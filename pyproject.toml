@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "Anlasser"
+version = "0.0.1"
+description = ""
+authors = ["Aljoscha Vollmerhaus <git@aljoscha.vollmerhaus.net>"]
+readme = "README.md"
+packages = [{include = "anlasser", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+
+pytest-mock = "^3.14.0"
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.1.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+anlasser-ctl = 'anlasser.AnlasserClientCli:client_cli'
+anlasser-agent = 'anlasser.AnlasserAgentCli:agent_cli'
+anlasser-vm = 'anlasser.AnlasserVMCli:vm_cli'
+anlasser-mkvm = 'anlasser.AnlasserMkVMCli:mkvm_cli'
