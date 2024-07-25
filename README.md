@@ -91,7 +91,7 @@ Watch your back if you're actually using this stuff.
 
 ### Guest shutdown
 Guests are expected to shut down immediately upon receipt of an ACPI shutdown signal from Bhyve.  
-By default, `anlasseragent` waits 300 seconds for a VM to shut down gracefully.  
+By default, `anlasser-agent` waits 300 seconds for a VM to shut down gracefully.  
 If it doesn't, the Bhyve process gets killed.
 
 ### Re-installing guest OSes
@@ -132,14 +132,14 @@ start with `test_` inside the `tests` folder.
 - Serial console for the VMs
 - At the moment, there is no autostarter for the VMs. While it's not a priority, it may still get implemented someday.
 - Maybe a small local webserver with noVNC and start/stop buttons?
-- Extend testing to test `anlasseragent` and `anlasserctl` as well
+- Extend testing to test `anlasser-agent` and `anlasser-ctl` as well
 - Integrate [Black](https://black.readthedocs.io/en/stable/index.html) into some kind of pre-commit hook or something
 - Windows support. See [FreeBSD Wiki on bhyve Windows support](https://wiki.freebsd.org/bhyve/Windows)
 - At the moment, `anlasseragent` is blocked when processing a VM shutdown or something. The whole architecture of the  
   program needs to be redesigned, probably using async/await or threads
 - Extend testing to check correct responses for deliberately false inputs, like incorrect configs,  
   configs which present duplicate VM names or incorrect cli flags
-- `anlasserctl` output should be nicely formatted instead of timestamped raw json
+- `anlasser-ctl` output should be nicely formatted instead of timestamped raw json
 - Do we need the "nocache" and/or "direct" options for our nvme storage? Or adapt number of queues to our HDD count?  
   Use some cross-platform benchmarks to compare host, guests and options. Maybe `sysbench`?
 - Support pci / nvme device passthrough
