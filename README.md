@@ -14,7 +14,7 @@ To keep the code simple, this project currently makes the following more or less
 - Everyone wants a VNC Server on localhost for console access, to be used via `ssh -L` or something
 - Backups and snapshots are to be handled from the outside using ZFS or other 3rd party software
 
-All of these may or may not change if this project ever matures, some even made it into the FIXME list.
+All of these may or may not change if this project ever matures, some even made it into the FIXME list.  
 We will probably support multiple tap devices and storage devices per VM in the future.  
 Maybe VNC servers should be optional, plus optional serial ports for console access?  
 Others may never change, I'm quite sure VM snapshots, backups and bridge device management will stay out of scope.  
@@ -28,10 +28,12 @@ Aside from that, most other tools didn't fit my bill 100%.
 The biggest issue was that my VMs rest on encrypted ZFS datasets and many tools operate under  
 the assumption that the datasets are available during system boot.  
 I also wanted to be as self-reliant as possible, without fear of having a building block of my private infrastructure
-abandoned a year later. Many of these project seem to be a one-person shows (just like this one).  
+abandoned a year later.  
+Many of these project seem to be a one-person shows (just like this one).  
 Another consideration is that some of the other bhyve management solutions seem to presume that  
-you want them to roll their own network bridges and whatnot, while I wanted to use pre-existing bridges that are already  
-in use by my jails. So I didn't want any extra management layers. It's all configured via Ansible anyway.  
+you want them to roll their own network bridges and whatnot,  
+while I wanted to use pre-existing bridges that are already in use by my jails.  
+So I didn't want any extra management layers. It's all configured via Ansible anyway.  
 Even more considerations:
 - The VM configuration and related tasks should be as Ansible-friendly as possible
 - The software should be as lightweight as possible in order to keep maintenance burden down 
@@ -72,8 +74,8 @@ vnc_port = 5900
 If `iso_path` is configured, we'll boot from the iso file.  
 If `mac` is configured, it will override mac address auto-generation.
 
-Be sure to match the number of sockets and threads to your CPU, or at least don't exceed the number of cores / threads  
-that your CPU actually has.  
+Be sure to match the number of sockets and threads to your CPU,  
+or at least don't exceed the number of cores / threads that your CPU actually has.  
 The Linux kernel inside the guest might otherwise start using `hpet` instead of `tsc` as a clock source.  
 That may lead to degraded performance. Look for `clocksource` entries in `dmesg`.  
 Note the number of threads is per-core and the number of cores is per-socket.  
@@ -101,8 +103,8 @@ but makes it hard to re-install the OS because he VM will continue to boot from 
 Bhyve supports a bootindex order, but the TianoCore firmware inside the guest may ignore that.  
 The simplest way is probably to simply replace the UEFI vars file for the VM with a fresh one.  
 That should lead to the VM defaulting to a boot from the ISO file.  
-If you want to change the boot order manually, set `vnc_wait_connect = True` in the VM config and mash F2 during  
-VM startup.
+If you want to change the boot order manually,  
+set `vnc_wait_connect = True` in the VM config and mash F2 during VM startup.
 
 ## How to use
 FIXME: Write some actual command examples and stuff here
