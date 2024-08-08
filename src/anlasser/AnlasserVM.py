@@ -173,9 +173,11 @@ class AnlasserVM:
             # But all I got out of that were problems with unstable tsc clocksource.
             # I'm not sure how bad that really is, but it seems to be linked to problem reports.
             # So let's stay away from the newer fwcfg for now.
-            # Update 13.6.24: clocksource problems seem to be unrelated to `fwcfw=qemu`.
+            # Update 13.06.24: clocksource problems seem to be unrelated to `fwcfw=qemu`.
+            # Update 08.08.24: when testing with an Intel Atom C3558, `fwcfw=qemu` lead to problems with just one
+            # CPU core being detected inside the VM (tested with Linux kernel 6.1 and 6.11).
             "-l",
-            f"bootrom,/usr/local/share/uefi-firmware/BHYVE_UEFI.fd,{self.uefi_vars_storage_path},fwcfg=qemu",
+            f"bootrom,/usr/local/share/uefi-firmware/BHYVE_UEFI.fd,{self.uefi_vars_storage_path}",
         ]
 
         if self.vnc_kbd_layout is not None:
