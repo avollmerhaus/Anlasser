@@ -80,7 +80,7 @@ The Linux kernel inside the guest might otherwise start using `hpet` instead of 
 That may lead to degraded performance. Look for `clocksource` entries in `dmesg`.  
 Note the number of threads is per-core and the number of cores is per-socket.  
   
-We use flat files instead if zvols for the storage path.  
+We use flat files instead of zvols for the storage path.  
 As per [vermaden](https://vermaden.wordpress.com/2023/08/18/freebsd-bhyve-virtualization/), raw files and nvme are faster than virtio and zvols!  
 
 ## Warning and notes on usage
@@ -110,6 +110,7 @@ set `vnc_wait_connect = True` in the VM config and mash F2 during VM startup.
 FIXME: Write some actual command examples and stuff here
 
 ### How to run tests
+First, instruct `poetry` to install the optional test group deps: `poetry install --with test`
 Run pytest using `poetry run pytest`.  
 That should look for all functions beginning with `test_` inside of all files that  
 start with `test_` inside the `tests` folder.
