@@ -196,7 +196,7 @@ class AnlasserVM:
 
         if self.iso_path is not None:
             # Some OS seem to be picky and want disk devices or dvds only in slots 3 to 6.
-            self.bhyve_command.extend(["-s", f"3:,ahci-cd,{self.iso_path}"])
+            self.bhyve_command.extend(["-s", f"3,ahci-cd,{self.iso_path}"])
 
         # VM name always has to be the last component of the bhyve command
         self.bhyve_command.append(self.name)
