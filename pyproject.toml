@@ -9,9 +9,11 @@ packages = [{include = "anlasser", from = "src"}]
 [tool.poetry.dependencies]
 python = "^3.9"
 
+[tool.poetry.group.test]
+optional = true
+[tool.poetry.group.test.dependencies]
 pytest-mock = "^3.14.0"
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.1.1"
+pytest = "^8.3.3"
 
 [build-system]
 requires = ["poetry-core"]
