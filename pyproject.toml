@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "Anlasser"
-version = "0.0.2"
+version = "0.0.3"
 description = ""
 authors = ["Aljoscha Vollmerhaus <git@aljoscha.vollmerhaus.net>"]
 readme = "README.md"
