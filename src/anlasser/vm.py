@@ -5,7 +5,21 @@ import subprocess
 from pathlib import Path
 from time import sleep, time
 
-from anlasser.AnlasserErrors import VMConfigError
+from .errors import AnlasserInvalidVMConfigError
+
+# Used by:
+# - AnlasserMessages when creating messages
+# - AnlasserSockServ when parsing client messages
+# Should probably also be used by the CLI when creating VMs
+def check_vm_name_format(vm_name):
+    if not isinstance(vm_name, str):
+        raise AnlasserInvalidVMConfigError("vm_name must be a string")
+    if not vm_name:
+        raise AnlasserInvalidVMConfigError("vm_name cannot be empty")
+    if len(vm_name) > 255:
+        raise AnlasserInvalidVMConfigError("vm_name cannot exceed 255 characters")
+    if not vm_name.isascii():
+        raise AnlasserInvalidVMConfigError("vm_name must contain only ASCII characters")
 
 # A word of warning to whomever might try to redesign this code.
 # Do not try and wait for the bhyve subprocess from inside a signal handler.
@@ -100,12 +114,12 @@ class AnlasserVM:
             self.vnc_kbd_layout = config["VM"].get("vnc_kbd_layout", None)
             self.iso_path = config["VM"].get("iso_path", None)
         except KeyError as e:
-            raise VMConfigError(
+            raise AnlasserInvalidVMConfigError(
                 f"Error loading VM config at {config_path}, missing key {e}"
             )
 
         if self.name != Path(config_path).stem:
-            raise VMConfigError(
+            raise AnlasserInvalidVMConfigError(
                 f"Error loading VM config file at {config_path}, file name / VM name mismatch"
             )
 
@@ -119,7 +133,7 @@ class AnlasserVM:
         # Is the tapdev unique?
         # The question is probably which kind of things we'll want to allow,
         # for example configuring 2 VMs with the same backing storage is fine in some situations.
-        # Should an untenable configuration be detected, raise VMConfigError or ValueError.
+        # Should an untenable configuration be detected, raise AnlasserInvalidVMConfigError.
         # We'll also need tests to verify that.
 
         tap_config = f"{self.tapdev},mac={self.mac}" if self.mac else f"{self.tapdev}"
@@ -192,7 +206,7 @@ class AnlasserVM:
                     f"No VNC keyboard layout file at {vnc_kbd_layout_path}, ignoring layout"
                 )
                 # Should we make this fatal? Without more modifications, this prevents testing on Linux
-                # raise VMConfigError(f"No VNC keyboard layout file at {vnc_kbd_layout_path}")
+                # raise AnlasserInvalidVMConfigError(f"No VNC keyboard layout file at {vnc_kbd_layout_path}")
 
         if self.iso_path is not None:
             # Some OS seem to be picky and want disk devices or dvds only in slots 3 to 6.
@@ -308,12 +322,12 @@ class AnlasserVM:
         :return: 0 if bhyve terminated successfully, 1 otherwise.
         """
         if self.bhyve_command is None:
-            raise VMConfigError(
+            raise AnlasserInvalidVMConfigError(
                 "run() invoked w/o config. You have to load a config using load_config() first."
             )
 
         if not Path(self.uefi_vars_storage_path).is_file():
-            raise VMConfigError(
+            raise AnlasserInvalidVMConfigError(
                 f"No EFIVARS file at {self.uefi_vars_storage_path}, copy it from /usr/local/share/uefi-firmware/BHYVE_UEFI_VARS.fd"
             )
 

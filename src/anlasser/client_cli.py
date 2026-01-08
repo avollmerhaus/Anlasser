@@ -2,7 +2,7 @@ import argparse
 import logging
 from pathlib import Path
 
-import anlasser.AnlasserClient as Client
+import anlasser.client as Client
 from anlasser import __version__ as anlasser_version
 
 
@@ -42,6 +42,7 @@ def _set_vm_state(vm_name, target_state, socket_path):
 def _get_vm_state(vm_name, socket_path):
     msg = dict()
     msg["action"] = "get_vm_state"
+    msg["vm_name"] = vm_name
     server_json = _get_server_data(socket_path=socket_path, data=msg)
     if server_json in ["server_command_failed", "server_data_malformed"]:
         return 101

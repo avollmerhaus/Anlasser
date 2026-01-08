@@ -5,8 +5,7 @@ import sys
 from pathlib import Path
 
 from anlasser import __version__ as anlasser_version
-from anlasser.AnlasserMkVM import (create_sparse_file, create_zfs_dataset,
-                                   write_base_config)
+from anlasser.mkvm import create_sparse_file, create_zfs_dataset, write_base_config
 
 
 def mkvm_cli():

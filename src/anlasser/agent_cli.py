@@ -1,10 +1,9 @@
 import argparse
+import asyncio
 import logging
-import os
-import signal
 from pathlib import Path
 
-from anlasser.AnlasserAgent import AnlasserAgent
+from anlasser.agent import AnlasserController
 from anlasser import __version__ as anlasser_version
 
 
@@ -59,23 +58,34 @@ def agent_cli():
     if cliargs.autostart:
         raise NotImplementedError
 
-    agent = AnlasserAgent(vm_configs_dir=vm_configs_dir, socket_path=cliargs.socketpath)
-    logging.info(
-        f"Initialized AnlasserAgent, config dir {vm_configs_dir}, socket path {cliargs.socketpath}"
+    # Maybe it would be a good idea to split the socket and client handling stuff
+    # into a separate class.
+    # The CLI could tie it together with the VM controller,
+    # maybe the work queue could be created here and supplied to
+    # the socket server class AND the VM controller?
+    # It would free the controller class from all the client message parsing and handling.
+    # How do we organize the async loop?
+    # It needs to be moved in here to multiplex that shit?
+    # Let's keep the CLI interface clean.
+    # Move socket server stuff into the AnlasserSockServ class,
+    # the VM subproc management into AnlasserVMController,
+    # and tie it all together via AnlasserAgent
+    socket_path = Path(cliargs.socketpath).expanduser()
+    try:
+        socket_path.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        logging.error(f"Unable to remove existing socket at {socket_path}: {exc}")
+        return 5
+
+    controller = AnlasserController(
+        vm_configs_dir=vm_configs_dir, socket_path=socket_path
     )
-
-    def exit_signal_handler(signal_number, _):
-        sig_name = signal.Signals(signal_number).name
-        logging.info(f"Got signal {sig_name}, triggering shutdown procedure")
-        agent.shutdown_flag = True
-
-    # SIGTERM and SIGINT should raise SystemExit,
-    # the registered exit function inside AnlasserAgent is responsible for shutting down the VMs.
-    signal.signal(signal.SIGTERM, exit_signal_handler)
-    signal.signal(signal.SIGINT, exit_signal_handler)
-
-    logging.info(os.environ["PATH"])
-    return agent.run()
+    logging.info(
+        f"Initialized AnlasserController, config dir {vm_configs_dir}, socket path {cliargs.socketpath}"
+    )
+    return asyncio.run(controller.main())
 
 
 if __name__ == "__main__":

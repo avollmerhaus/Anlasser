@@ -6,7 +6,7 @@ from shutil import which
 from sys import stdout
 
 from anlasser import __version__ as anlasser_version
-from anlasser.AnlasserVM import AnlasserVM
+from anlasser.vm import AnlasserVM
 
 
 def vm_cli():
