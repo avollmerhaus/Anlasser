@@ -4,8 +4,16 @@ import asyncio
 import logging
 from pathlib import Path
 
-from .messages import AnlasserResponse
-from .errors import AnlasserError
+from .messages import (
+    parse_anlasser_request,
+    validate_anlasser_response,
+)
+from .errors import (
+    AnlasserError,
+    AnlasserVMError,
+    AnlasserInvalidActionError,
+    AnlasserInvalidMessageError,
+)
 
 
 class AnlasserSockServer:
@@ -54,26 +62,10 @@ class AnlasserSockServer:
                     logging.warning("Client sent empty line, ignoring")
                     continue
 
+                response_dict = await self._handle_client_msg(line)
                 try:
-                    client_msg = json.loads(line.decode())
-                except json.JSONDecodeError as exc:
-                    logging.warning(f"Client sent malformed JSON: {exc}")
-                    continue
-                # FIXME: instead of checking if we got a dict, we should
-                # probably verify against a formal message spec.
-                # messages.py ain't gonna cut it.
-                if not isinstance(client_msg, dict):
-                    logging.warning("Client sent non-object JSON, ignoring")
-                    continue
-
-                # FIXME: maybe some of the problems that result in abort before we land here
-                # should generate proper `AnlasserResponse(success=False)` reactions.
-                # Maybe generalize the try except for that.
-                response = await self._handle_client_msg(client_msg)
-                try:
-                    # Should we verify that response is of type AnlasserResponse?
-                    response_json = json.dumps(vars(response))
-                    response_bin = response_json.encode("utf-8")
+                    response_json = json.dumps(response_dict)
+                    response_bin = response_json.encode("utf-8") + b"\n"
                     writer.write(response_bin)
                     await writer.drain()
                 except (ConnectionResetError, BrokenPipeError):
@@ -84,14 +76,44 @@ class AnlasserSockServer:
             writer.close()
             await writer.wait_closed()
 
-    async def _handle_client_msg(self, client_msg):
-        loop = asyncio.get_running_loop()
-        response_future = loop.create_future()
+    async def _handle_client_msg(self, raw_message):
 
-        await self._workq.put((client_msg, response_future))
+        # Workflow:
+        # - response_future gets passed to the agent using workq
+        # - agent uses set_result or set_exception on response_future (bringing uns back into this function)
+        # - if set_exception was used on the future, the exception gets raised inside this function
+        # - only AnlasserError and derived exceptions are to be set by the agent or handled here,
+        #   all other exceptions are considered bugs that should simply crash the code.
+        # - if set_result was used, we assume the action to be completed without error and the result to be the action result
+        # - what that result might be depends on the action. For `set_vm_state``, it might be `None`. For `list_vms`, a list.
+        # - generate a response
+        # - run response through validator
+        # - crash if it fails (that's a bug after all)
+        response = {"success": False}
         try:
-            response_payload = await response_future
-            return AnlasserResponse(success=True, payload=response_payload)
+            parsed_client_msg = parse_anlasser_request(raw_message)
+
+            loop = asyncio.get_running_loop()
+            response_future = loop.create_future()
+
+            await self._workq.put((parsed_client_msg, response_future))
+
+            response["result"] = await response_future
+
+        except (AnlasserInvalidMessageError, AnlasserInvalidActionError) as exc:
+            logging.warning(f"Client action failed: {exc}; message={raw_message!r}")
+            response["error"] = {"code": "invalid_request", "message": str(exc)}
+
+        except AnlasserVMError as exc:
+            logging.warning(f"Client action failed: {exc}")
+            response["error"] = {"code": "vm_error", "message": str(exc)}
+
         except AnlasserError as exc:
-            logging.warning(f"Client action failed: {str(exc)}")
-            return AnlasserResponse(success=False, payload=str(exc))
+            logging.warning(f"Client action failed: {exc}")
+            response["error"] = {"code": "internal_error", "message": str(exc)}
+
+        else:
+            response["success"] = True
+
+        validate_anlasser_response(response)
+        return response

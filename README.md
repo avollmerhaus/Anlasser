@@ -151,3 +151,7 @@ start with `test_` inside the `tests` folder.
 - Maybe create a class that defines some common methods and attributes like `shutdown_flag`, `_exit_code` and inherit
   from that in `AnlasserVM` and `AnlasserAgent`.
 - Create a proper FreeBSD port. Maybe see https://github.com/psy0rz/zfs_autobackup/tree/master for how they do that.
+
+## Debugging by hand
+Running the agent: `poetry run anlasser-agent --socketpath /tmp/anlasser.sock --confdir /tmp`  
+Running the client: ` poetry run anlasser-ctl --socketpath /tmp/anlasser.sock --set-state up --vm foo`

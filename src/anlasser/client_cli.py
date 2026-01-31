@@ -9,19 +9,19 @@ from anlasser import __version__ as anlasser_version
 def _get_server_data(socket_path, data):
     server_response = Client.communicate(socket_path=socket_path, data=data)
     server_json = Client.load_json_from_server_msg(server_response)
-    if not server_json.get("result"):
-        logging.error(
-            f"Server didn't fill the 'result' field of the return message! Message invalid!"
-        )
+    if not server_json:
+        logging.error("Server returned no data")
         return "server_data_malformed"
-    if server_json["result"] == "failure":
-        error_type = server_json["error_type"]
-        error_text = server_json["error_text"]
-        extra_data = server_json.get("error_extra_data", "(No extra data)")
+    if "success" not in server_json:
+        logging.error("Server didn't fill the 'success' field of the return message!")
+        return "server_data_malformed"
+    if not server_json["success"]:
+        error = server_json.get("error", {})
+        error_code = error.get("code", "unknown")
+        error_message = error.get("message", "No message provided")
         logging.error("Server signalled command failure!")
-        logging.error(f"error_type: {error_type}")
-        logging.error(f"error_text: {error_text}")
-        logging.error(f"error_extra_data: {extra_data}")
+        logging.error(f"error_code: {error_code}")
+        logging.error(f"error_message: {error_message}")
         return "server_command_failed"
     logging.debug("_get_server_data returned parsed server_json")
     return server_json
@@ -30,7 +30,7 @@ def _get_server_data(socket_path, data):
 def _set_vm_state(vm_name, target_state, socket_path):
     msg = dict()
     msg["action"] = "set_vm_state"
-    msg["vm_target_state"] = target_state
+    msg["state"] = target_state
     msg["vm_name"] = vm_name
     server_json = _get_server_data(socket_path=socket_path, data=msg)
     if server_json in ["server_command_failed", "server_data_malformed"]:
@@ -57,7 +57,8 @@ def _list_vms(socket_path):
     server_json = _get_server_data(socket_path=socket_path, data=msg)
     if server_json in ["server_command_failed", "server_data_malformed"]:
         return 101
-    logging.info(server_json["vm_list"])
+    result = server_json.get("result", {})
+    logging.info(result.get("vm_list", []))
     return 0
 
 

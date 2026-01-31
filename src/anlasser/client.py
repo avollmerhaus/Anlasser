@@ -11,13 +11,17 @@ def _get_socket(socket_path):
 
 def _get_socket_data(ctl_sock, timeout):
     ctl_sock.settimeout(timeout)
-    data = ctl_sock.recv(8192)
-    if not data:
+    sock_file = ctl_sock.makefile("rb")
+    raw = sock_file.readline(65536)
+    if not raw:
         logging.info("No data left on socket, server has probably gone away.")
         return None
+    if raw[-1:] != b"\n":
+        logging.warning("Server message exceeded 64kb or missing terminator, discarded")
+        return None
     # `repr()` prints newlines and other stuff as \n here, not as actual newlines etc.
-    logging.debug(repr(f"raw server message: {data}"))
-    return data
+    logging.debug(repr(f"raw server message: {raw}"))
+    return raw
 
 
 def communicate(socket_path, data, timeout=360):
@@ -43,10 +47,8 @@ def load_json_from_server_msg(raw_server_data):
     return parsed_data
 
 
-# FIXME: we need a message class that is shared between the client and server code so we can have proper validation.
-# jsonschema has a dependency on rust, and I want to keep it pure python at the moment.
+# FIXME: we need a message schema that is shared between the client and server code so we can have proper validation.
 # from jsonschema import validate
-# jsonschema depends on "maturin", which needs rustc. Let's keep this pure python.
 # def validate_server_message(parsed_data):
 
 

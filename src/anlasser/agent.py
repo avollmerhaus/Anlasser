@@ -4,8 +4,8 @@ import signal
 from pathlib import Path
 
 from .sock_server import AnlasserSockServer
-from .actions import set_vm_state, get_vm_state
 from .errors import AnlasserInvalidActionError, AnlasserError
+from .vm import AnlasserVM
 
 # the plan
 # - create the workq from here
@@ -40,23 +40,11 @@ class AnlasserController:
                 # invalid actions down below.
                 action = payload.get("action")
                 
-                # FIXME: should probably check for vm_name here
-
-                # INTERNAL EVENTS, no response_future will be needed / awaited
-                if action == "vm_shutdown":
-                    vm_name = payload.get("vm_name")
-                    logging.info(f"Dispatch: shutdown_event for {vm_name}")
-                    if vm_name:
-                        self._vms.pop(vm_name, None)
-                    continue
-
                 # EXTERNAL REQUESTS, we assume `response_future` to be an instance of `asyncio.Future` from here on!
                 # We use set_result / set_exception to signal success or failure.
+                # Messages that make it into this part of the code are assumed to have passed schema verification.
+                # See ANLASSER_REQUEST_SCHEMA from messages.py
                 try:
-                    if action in ["set_vm_state", "get_vm_state"]:
-                        if payload.get("vm_name") is None:
-                            raise AnlasserInvalidActionError(f"missing vm_name")
-
                     if action == "list_vms":
                         logging.info("Dispatch: list_vms")
                         vm_list = [name for name in sorted(self._vms.keys())]
@@ -64,10 +52,13 @@ class AnlasserController:
                     
                     elif action == "set_vm_state":
                         logging.info(f"Dispatch: set_vm_state")
-                        action_result = await set_vm_state(payload, tg)
+                        # FIXME: inline this? Or make it a method of this object?
+                        vm_name = payload["vm_name"]
+                        target_state = payload["state"]
+                        action_result = await self.set_vm_state(vm_name, target_state, tg)
 
                     elif action == "get_vm_state":
-                        vm_name = payload.get("vm_name")
+                        vm_name = payload["vm_name"]
                         logging.info(f"Dispatch: get_vm_state {vm_name}")
                         state = "up" if vm_name in self._vms.keys() else "down"
                         action_result = {"vm_state": state}
@@ -91,19 +82,28 @@ class AnlasserController:
             # Maybe cancel fut if it's not None?
             raise
 
-    async def set_vm_state(self, payload, tg):
-        check_vm_name_format(vm_name)
+    async def set_vm_state(self, vm_name, target_state, tg):
+        logging.info(f"set_vm_state: {vm_name} -> {target_state}")
         # need to use task group from here in case we have to start a VM!
         # we also need to check if the VM is already up!
         # if target state is down, but the vm isn't in the vm list, raise a spe
         if target_state == "down":
-            if vm_name not in vm_list:
+            if vm_name not in self._vms:
                 return True
-            return True # Real shutdown logic goes here, raise some AnlasserException if timeout!
+            task = self._vms[vm_name]
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            return True
         if target_state == "up":
-            if vm_name in vm_list:
+            if vm_name in self._vms:
                 return True
-            return True # Real start logic goes here, Anlasser VM should raise AnlasserInvalidVMConfigError if config not found or corrupt!
+            vm = AnlasserVM(vm_name, self._on_vm_exit)
+            task = tg.create_task(vm.run())
+            self._vms[vm_name] = task
+            return True  # Real start logic goes here, should raise AnlasserInvalidVMConfigError if config not found or corrupt!
 
         raise AnlasserInvalidActionError("target_state must be up or down")
 
@@ -150,3 +150,6 @@ class AnlasserController:
 
     def _vm_config_path(self, vm_name):
         return self._vm_configs_dir / f"{vm_name}.ini"
+
+    def _on_vm_exit(self, vm_name):
+        self._vms.pop(vm_name, None)
