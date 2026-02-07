@@ -18,14 +18,18 @@ from .errors import (
 
 class AnlasserSockServer:
 
-    def __init__(self, socket_path, workq):
+    def __init__(self, socket_path, handler):
         self._sock_path = Path(socket_path)
-        self._workq = workq
+        self._handler = handler
         self._server = None
 
     async def serve(self):
         if self._sock_path.exists():
-            self._sock_path.unlink()
+            raise RuntimeError(
+                f"Socket file already exists at {self._sock_path}; "
+                "another process might be running or the socket is stale. "
+                "Remove it manually if you are sure it is safe."
+            )
 
         old_umask = os.umask(0o077)
         try:
@@ -38,11 +42,13 @@ class AnlasserSockServer:
         logging.info(f"Socket server listening on {self._sock_path}")
         try:
             await self._server.serve_forever()
-        except asyncio.CancelledError:
+        finally:
             logging.info("Shutdown unix socket server")
-            self._server.close()
-            await self._server.wait_closed()
-            raise
+            if self._server is not None:
+                self._server.close()
+                await self._server.wait_closed()
+            if self._sock_path.exists():
+                self._sock_path.unlink()
 
     async def _handle_client_connection(self, reader, writer):
         logging.info("Client connected")
@@ -79,12 +85,10 @@ class AnlasserSockServer:
     async def _handle_client_msg(self, raw_message):
 
         # Workflow:
-        # - response_future gets passed to the agent using workq
-        # - agent uses set_result or set_exception on response_future (bringing uns back into this function)
-        # - if set_exception was used on the future, the exception gets raised inside this function
-        # - only AnlasserError and derived exceptions are to be set by the agent or handled here,
+        # - request gets passed to the agent using a direct callback
+        # - only AnlasserError and derived exceptions are to be raised by the agent or handled here,
         #   all other exceptions are considered bugs that should simply crash the code.
-        # - if set_result was used, we assume the action to be completed without error and the result to be the action result
+        # - if the callback returns, we assume the action to be completed without error and the result to be the action result
         # - what that result might be depends on the action. For `set_vm_state``, it might be `None`. For `list_vms`, a list.
         # - generate a response
         # - run response through validator
@@ -93,12 +97,7 @@ class AnlasserSockServer:
         try:
             parsed_client_msg = parse_anlasser_request(raw_message)
 
-            loop = asyncio.get_running_loop()
-            response_future = loop.create_future()
-
-            await self._workq.put((parsed_client_msg, response_future))
-
-            response["result"] = await response_future
+            response["result"] = await self._handler(parsed_client_msg)
 
         except (AnlasserInvalidMessageError, AnlasserInvalidActionError) as exc:
             logging.warning(f"Client action failed: {exc}; message={raw_message!r}")
