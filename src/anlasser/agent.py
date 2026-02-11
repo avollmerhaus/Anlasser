@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .sock_server import AnlasserSockServer
 from .errors import AnlasserInvalidActionError
-from .vm import AnlasserVM
+from .bhyve_driver import AnlasserBhyveDriver
 
 class AnlasserShutdown(Exception):
     """ Used to stop the TaskGroup """    
@@ -54,8 +54,7 @@ class AnlasserController:
 
             except asyncio.CancelledError:
                 logging.debug("Stopping dispatch")
-                # Is there something we need to do here?
-                # Maybe cancel fut if it's not None?
+                # Is there something else we need to do here?
                 raise
 
     async def set_vm_state(self, vm_name, target_state):
@@ -63,18 +62,18 @@ class AnlasserController:
         if target_state == "down":
             if vm_name not in self._vms:
                 return True
-            task = self._vms[vm_name]
+            task = self._vms[vm_name]["task"]
             task.cancel()
             await task
             return True
         if target_state == "up":
             if vm_name in self._vms:
                 return True
-            on_exit = lambda vm_name=vm_name: self._vms.pop(vm_name, None)
-            vm = AnlasserVM(vm_name, on_exit)
+            vm = AnlasserBhyveDriver(vm_name)
             vm.load_config(self._vm_config_path(vm_name))
             task = self._tg.create_task(vm.run())
-            self._vms[vm_name] = task
+            self._vms[vm_name] = {"task": task, "driver": vm}
+            task.add_done_callback(lambda _task: self._vms.pop(vm_name, None))
             return True
 
         raise AnlasserInvalidActionError("target_state must be up or down")

@@ -2,11 +2,11 @@ import configparser
 import logging
 from pathlib import Path
 
-from .errors import AnlasserVMError
+from .errors import AnlasserBhyveDriverError
 
 
-def load_vm_config(vm, config_path):
-    logging.info(f"Trying to load config from {config_path}")
+def load_bhyve_driver_config(vm, config_path):
+    logging.info(f"Trying to load bhyve driver config from {config_path}")
     # We don't need to check if the config file actually exists.
     # config.read() will return an empty config for a nonexistent file, so we'll run into the KeyError handler.
     try:
@@ -35,17 +35,17 @@ def load_vm_config(vm, config_path):
         if shutdown_timeout is not None:
             vm.shutdown_timeout = float(shutdown_timeout)
     except KeyError as e:
-        raise AnlasserVMError(
-            f"Error loading VM config at {config_path}, missing key {e}"
+        raise AnlasserBhyveDriverError(
+            f"Error loading bhyve driver config at {config_path}, missing key {e}"
         )
     except ValueError as e:
-        raise AnlasserVMError(
-            f"Error loading VM config at {config_path}, invalid value {e}"
+        raise AnlasserBhyveDriverError(
+            f"Error loading bhyve driver config at {config_path}, invalid value {e}"
         )
 
     if vm.name != Path(config_path).stem:
-        raise AnlasserVMError(
-            f"Error loading VM config file at {config_path}, file name / VM name mismatch"
+        raise AnlasserBhyveDriverError(
+            f"Error loading bhyve driver config file at {config_path}, file name / VM name mismatch"
         )
 
     tap_config = f"{vm.tapdev},mac={vm.mac}" if vm.mac else f"{vm.tapdev}"

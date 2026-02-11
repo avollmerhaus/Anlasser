@@ -2,16 +2,20 @@ import asyncio
 import logging
 from pathlib import Path
 
-from .errors import AnlasserVMError
-from .vm_config import load_vm_config
-from .vm_networking import (
+from .bhyve_driver_config import load_bhyve_driver_config
+from .bhyve_driver_networking import (
     tap_operation,
     wait_for_tap_device_creation,
 )
 
-class AnlasserVM:
+from .errors import AnlasserBhyveDriverError
 
-    def __init__(self, name, on_exit):
+class AnlasserBhyveDriver:
+    """Bhyve VM driver.
+
+    """
+
+    def __init__(self, name):
         # VM config (public)
         self.name = name
         self.memory_mb = None
@@ -32,10 +36,10 @@ class AnlasserVM:
 
         # Runtime state
         self._bootstrap_done = False
-        self._on_exit = on_exit
+
 
     def load_config(self, config_path):
-        load_vm_config(self, config_path)
+        load_bhyve_driver_config(self, config_path)
 
     async def _network_setup(self):
         if self._bootstrap_done:
@@ -64,6 +68,13 @@ class AnlasserVM:
 
     async def _stop_bhyve(self, proc):
         if proc is None or proc.returncode is not None:
+            # FIXME: this if condition is an inelegant mess.
+            # We could simplify, but maybe we should remove it altogether?
+            # Shouldn't the controller have made sure that we've been removed from the list
+            # of running VMs if we have no proc or it's done?
+            # There could be a miniscule race condition if _stop is called while we're initializing
+            # a VM object. Maybe we should guard against that with a simple mechanism here.
+            # We also need to have a test that makes sure the callback is effective, I guess.
             logging.warning(
                 f"VM {self.name}: Not running (proc={'none' if proc is None else 'done'}, rc={None if proc is None else proc.returncode})"
             )
@@ -80,35 +91,26 @@ class AnlasserVM:
             try:
                 await asyncio.wait_for(proc.wait(), 2.0)
             except asyncio.TimeoutError:
+                # FIXME: What does it mean to hit this codepath?
+                # Leaking a subprocess?
+                # But kill calls can't be blocked, could we even hit this condition?
                 logging.error(
                     f"VM {self.name}: Kill timeout expired, giving up on bhyve wait"
                 )
-
-    async def _bhyvectl_destroy(self):
-        # As long as the "--vm=(name)" parameter is present and the name has a device node at /dev/vmm/(name),
-        # bhyvectl will gladly accept whatever bullshit you throw at it and __only__ raise a syntax error
-        # if the bullshit has two dashes in front of it. So pay good attention when modifying the command!
-        # Forgetting some dashes in front of a command may leave you scratching your head.
-        command = ["bhyvectl", "--destroy", f"--vm={self.name}"]
-        logging.info(f"Running command: {command}")
-        proc = await asyncio.create_subprocess_exec(
-            *command,
-            start_new_session=True,
-        )
-        rc = await proc.wait()
-        if rc > 0:
-            logging.error(f"Error running bhyvectl: {rc}")
 
     async def run(self):
         proc = None
         try:
             if self.bhyve_command is None:
-                raise AnlasserVMError(
+                raise AnlasserBhyveDriverError(
                     "run() invoked w/o config. You have to load a config using load_config() first."
                 )
-            # exit status 0: normaler reboot
-            # exit status 1: poweroff, loggen, netzwerk aufräumen, done
-            # exit status alles andere: error loggen, netzwerk aufräumen, done
+            if Path(f"/dev/vmm/{self.name}").exists():
+                raise AnlasserBhyveDriverError(
+                    f"VM {self.name}: Refusing to start, device node /dev/vmm/{self.name} already exists. "
+                    "This indicates a stale or still-running VM context. If you are sure the VM is not running, "
+                    f"clean it up with: bhyvectl --destroy --vm={self.name}"
+                )
             # Let's initialize into the reboot state. We break out when bhyve sets a different exit code.
             rc = 0
             while rc == 0:
@@ -121,7 +123,8 @@ class AnlasserVM:
                     start_new_session=True,
                 )
                 logging.info(f"VM {self.name}: Subprocess started, pid={proc.pid}")
-                await self._network_setup()
+                if not self._bootstrap_done:
+                    await self._network_setup()
                 rc = await proc.wait()
                 logging.info(f"VM {self.name}: Subprocess exited, rc={rc}")
                 # Prevent runaway load should we somehow get into an infinite loop,
@@ -153,7 +156,3 @@ class AnlasserVM:
             return
         finally:
             await self._network_teardown()
-            if Path(f"/dev/vmm/{self.name}").exists():
-                await self._bhyvectl_destroy()
-            if self._on_exit is not None:
-                self._on_exit(self.name)

@@ -68,7 +68,7 @@ def agent_cli():
     # It needs to be moved in here to multiplex that shit?
     # Let's keep the CLI interface clean.
     # Move socket server stuff into the AnlasserSockServ class,
-    # the VM subproc management into AnlasserVMController,
+    # the VM subproc management into AnlasserBhyveDriverController,
     # and tie it all together via AnlasserAgent
     socket_path = Path(cliargs.socketpath).expanduser()
     try:

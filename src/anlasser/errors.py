@@ -2,8 +2,8 @@ class AnlasserError(ValueError):
     """Base class for Anlasser-specific errors."""
 
 
-class AnlasserVMError(AnlasserError):
-    """Raised for invalid or missing VM config, failure to start or something. Could be split up"""
+class AnlasserBhyveDriverError(AnlasserError):
+    """Raised for invalid or missing bhyve driver config, failure to start or something. Could be split up"""
 
 class AnlasserInvalidMessageError(AnlasserError):
     """Raised when a client message is invalid JSON or fails request validation."""

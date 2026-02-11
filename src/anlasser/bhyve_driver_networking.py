@@ -3,6 +3,13 @@ import logging
 
 
 async def wait_for_tap_device_creation(tapdev_name, timeout=5.0):
+    # FIXME: Instead of doing this dance, we should create the tap devices by ourselves.
+    # ourselves. Think {"myvm1": ["tap0, "tap1"]}.
+    # Or maybe {"tap0": "myvm1", "tap1": "myvm1", "tap2": "myvm2",}
+    # Or maybe even just a list?
+    # tap_interfaces = ["myvm1", "myvm1", "myvm2"]
+    # The list index would then become the N in tapN.
+    # In order to support multiple bridges, we'd need to store the associated bridge as well...
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     logging.info(f"Waiting {timeout}s for tap device {tapdev_name} to appear")

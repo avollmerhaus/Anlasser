@@ -10,7 +10,7 @@ from .messages import (
 )
 from .errors import (
     AnlasserError,
-    AnlasserVMError,
+    AnlasserBhyveDriverError,
     AnlasserInvalidActionError,
     AnlasserInvalidMessageError,
 )
@@ -97,13 +97,32 @@ class AnlasserSockServer:
         try:
             parsed_client_msg = parse_anlasser_request(raw_message)
 
+            # FIXME: How does this look like for an action like set vm state up?
+            # `{"success": True, "result": True}`
+            # That's kinda ugly, and what does it even mean?
+            # I think we're trying to communicate the right things here:
+            # - handling of the message was a success
+            # - the result of the request was a success
+            # But how do we name the keys appropriately?
+            # And isn't the absence of the "error" key enough to implicate success?
+            # Maybe it should be the other way around:
+            # Error should always be there.
+            # It should be True or False.
+            # Then we'd have a "data" field for the actual payload.
+            # Maybe we could even do it kind of like http here.
+            # Keys:
+            # - status: numeric code, like 200 for already running, 202 for started,
+            #   404 for VM config not found or something, 400 for bad request etc.
+            # - body: list of VMs, if requested. Or, in the future, other stuff, like VNC port.
+            #   But also error messages. The body should be machine-readable, so human-friendly messages
+            #   should probably be behind some key inside the body.
             response["result"] = await self._handler(parsed_client_msg)
 
         except (AnlasserInvalidMessageError, AnlasserInvalidActionError) as exc:
             logging.warning(f"Client action failed: {exc}; message={raw_message!r}")
             response["error"] = {"code": "invalid_request", "message": str(exc)}
 
-        except AnlasserVMError as exc:
+        except AnlasserBhyveDriverError as exc:
             logging.warning(f"Client action failed: {exc}")
             response["error"] = {"code": "vm_error", "message": str(exc)}
 
