@@ -6,7 +6,7 @@ from anlasser.messages import parse_anlasser_request
 from anlasser.errors import AnlasserInvalidMessageError
 
 
-def test_validate_anlasser_request_valid_variants():
+def test_anlasser_request_valid_variants():
     parse_anlasser_request(json.dumps({"action": "list_vms"}))
     parse_anlasser_request(json.dumps({"action": "get_vm_state", "vm_name": "testvm1"}))
     parse_anlasser_request(
@@ -14,7 +14,7 @@ def test_validate_anlasser_request_valid_variants():
     )
 
 
-def test_validate_anlasser_request_rejects_invalid_payloads():
+def test_anlasser_request_invalid_payloads():
     with pytest.raises(AnlasserInvalidMessageError):
         parse_anlasser_request(json.dumps({"action": "nope"}))
 
