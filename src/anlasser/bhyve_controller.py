@@ -2,18 +2,17 @@ import asyncio
 import logging
 from pathlib import Path
 
-from .bhyve_driver_config import load_bhyve_driver_config
-from .bhyve_driver_networking import (
+from .bhyve_controller_config import load_bhyve_controller_config
+from .bhyve_controller_networking import (
     tap_operation,
     wait_for_tap_device_creation,
 )
 
-from .errors import AnlasserBhyveDriverError
+from .errors import AnlasserBhyveControllerError
 
-class AnlasserBhyveDriver:
-    """Bhyve VM driver.
 
-    """
+class AnlasserBhyveController:
+    """Bhyve VM controller."""
 
     def __init__(self, name):
         # VM config (public)
@@ -37,9 +36,29 @@ class AnlasserBhyveDriver:
         # Runtime state
         self._bootstrap_done = False
 
-
     def load_config(self, config_path):
-        load_bhyve_driver_config(self, config_path)
+        load_bhyve_controller_config(self, config_path)
+
+    async def _destroy_vmm_device_node(self):
+        # bhyve does not clean up /dev/vmm/<name> on exit, regardless of exit code.
+        # Even with "-D", only guest-initiated poweroff (rc=1) is covered.
+        # We must always run bhyvectl --destroy to prevent stale device nodes
+        # that would block future starts of this VM.
+        vmm_path = Path(f"/dev/vmm/{self.name}")
+        if not vmm_path.exists():
+            logging.info(
+                f"VM {self.name}: VMM device node {vmm_path} not found, ignoring"
+            )
+            return
+        logging.info(f"VM {self.name}: Destroying VMM device node {vmm_path}")
+        proc = await asyncio.create_subprocess_exec(
+            "bhyvectl",
+            f"--destroy",
+            f"--vm={self.name}",
+        )
+        rc = await proc.wait()
+        if rc != 0:
+            logging.error(f"VM {self.name}: bhyvectl --destroy exited with rc={rc}")
 
     async def _network_setup(self):
         if self._bootstrap_done:
@@ -102,11 +121,11 @@ class AnlasserBhyveDriver:
         proc = None
         try:
             if self.bhyve_command is None:
-                raise AnlasserBhyveDriverError(
+                raise RuntimeError(
                     "run() invoked w/o config. You have to load a config using load_config() first."
                 )
             if Path(f"/dev/vmm/{self.name}").exists():
-                raise AnlasserBhyveDriverError(
+                raise AnlasserBhyveControllerError(
                     f"VM {self.name}: Refusing to start, device node /dev/vmm/{self.name} already exists. "
                     "This indicates a stale or still-running VM context. If you are sure the VM is not running, "
                     f"clean it up with: bhyvectl --destroy --vm={self.name}"
@@ -141,18 +160,13 @@ class AnlasserBhyveDriver:
                     "Bhyve exit status 0 (ordinary reboot), starting new process"
                 )
             elif rc == 1:
-                logging.info(
-                    "Bhyve exit status 1 (ordinary shutdown), not restarting"
-                )
+                logging.info("Bhyve exit status 1 (ordinary shutdown), not restarting")
             else:
-                logging.info(
-                    f"Bhyve exit status {rc}, not restarting"
-                )
+                logging.info(f"Bhyve exit status {rc}, not restarting")
         except asyncio.CancelledError:
-            logging.info(
-                f"VM {self.name} pid={proc.pid} cancelled, shutting down"
-            )
+            logging.info(f"VM {self.name} pid={proc.pid} cancelled, shutting down")
             await self._stop_bhyve(proc)
             return
         finally:
+            await self._destroy_vmm_device_node()
             await self._network_teardown()

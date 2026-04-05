@@ -3,7 +3,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from anlasser.agent import AnlasserController
+from anlasser.agent import AnlasserAgent
 from anlasser import __version__ as anlasser_version
 
 
@@ -58,18 +58,6 @@ def agent_cli():
     if cliargs.autostart:
         raise NotImplementedError
 
-    # Maybe it would be a good idea to split the socket and client handling stuff
-    # into a separate class.
-    # The CLI could tie it together with the VM controller,
-    # maybe the work queue could be created here and supplied to
-    # the socket server class AND the VM controller?
-    # It would free the controller class from all the client message parsing and handling.
-    # How do we organize the async loop?
-    # It needs to be moved in here to multiplex that shit?
-    # Let's keep the CLI interface clean.
-    # Move socket server stuff into the AnlasserSockServ class,
-    # the VM subproc management into AnlasserBhyveDriverController,
-    # and tie it all together via AnlasserAgent
     socket_path = Path(cliargs.socketpath).expanduser()
     try:
         socket_path.unlink()
@@ -79,13 +67,11 @@ def agent_cli():
         logging.error(f"Unable to remove existing socket at {socket_path}: {exc}")
         return 5
 
-    controller = AnlasserController(
-        vm_configs_dir=vm_configs_dir, socket_path=socket_path
-    )
+    agent = AnlasserAgent(vm_configs_dir=vm_configs_dir, socket_path=socket_path)
     logging.info(
-        f"Initialized AnlasserController, config dir {vm_configs_dir}, socket path {cliargs.socketpath}"
+        f"Initialized AnlasserAgent, config dir {vm_configs_dir}, socket path {cliargs.socketpath}"
     )
-    return asyncio.run(controller.main())
+    return asyncio.run(agent.main())
 
 
 if __name__ == "__main__":

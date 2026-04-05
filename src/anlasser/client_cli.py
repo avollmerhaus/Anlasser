@@ -1,63 +1,50 @@
 import argparse
 import logging
-from pathlib import Path
 
 import anlasser.client as Client
 from anlasser import __version__ as anlasser_version
+from anlasser.errors import (
+    AnlasserCommandFailedError,
+    AnlasserInvalidResponseError,
+)
 
 
-def _get_server_data(socket_path, data):
+def _server_action(socket_path, data):
     server_response = Client.communicate(socket_path=socket_path, data=data)
     server_json = Client.load_json_from_server_msg(server_response)
-    if not server_json:
-        logging.error("Server returned no data")
-        return "server_data_malformed"
-    if "success" not in server_json:
-        logging.error("Server didn't fill the 'success' field of the return message!")
-        return "server_data_malformed"
-    if not server_json["success"]:
-        error = server_json.get("error", {})
-        error_code = error.get("code", "unknown")
-        error_message = error.get("message", "No message provided")
-        logging.error("Server signalled command failure!")
-        logging.error(f"error_code: {error_code}")
-        logging.error(f"error_message: {error_message}")
-        return "server_command_failed"
-    logging.debug("_get_server_data returned parsed server_json")
+    status = server_json["status"]
+    if status < 200 or status > 299:
+        body = server_json.get("body", {})
+        error_message = body.get("error")
+        raise AnlasserCommandFailedError(
+            f"status={status}; error_message={error_message}"
+        )
+    logging.debug("_server_action returned parsed server_json")
     return server_json
 
 
 def _set_vm_state(vm_name, target_state, socket_path):
-    msg = dict()
-    msg["action"] = "set_vm_state"
-    msg["state"] = target_state
-    msg["vm_name"] = vm_name
-    server_json = _get_server_data(socket_path=socket_path, data=msg)
-    if server_json in ["server_command_failed", "server_data_malformed"]:
-        return 101
+    msg = {
+        "action": "set_vm_state",
+        "body": {"state": target_state, "vm_name": vm_name},
+    }
+    _server_action(socket_path=socket_path, data=msg)
     logging.info(f"VM {vm_name} set to state {target_state}")
     return 0
 
 
 def _get_vm_state(vm_name, socket_path):
-    msg = dict()
-    msg["action"] = "get_vm_state"
-    msg["vm_name"] = vm_name
-    server_json = _get_server_data(socket_path=socket_path, data=msg)
-    if server_json in ["server_command_failed", "server_data_malformed"]:
-        return 101
-    state = server_json["vm_state"]
+    msg = {"action": "get_vm_state", "body": {"vm_name": vm_name}}
+    server_json = _server_action(socket_path=socket_path, data=msg)
+    state = server_json["body"]["response"]["vm_state"]
     logging.info(f"VM {vm_name} is {state}")
     return 0
 
 
 def _list_vms(socket_path):
-    msg = dict()
-    msg["action"] = "list_vms"
-    server_json = _get_server_data(socket_path=socket_path, data=msg)
-    if server_json in ["server_command_failed", "server_data_malformed"]:
-        return 101
-    result = server_json.get("result", {})
+    msg = {"action": "list_vms", "body": {}}
+    server_json = _server_action(socket_path=socket_path, data=msg)
+    result = server_json["body"]["response"]
     logging.info(result.get("vm_list", []))
     return 0
 
@@ -70,27 +57,13 @@ def client_cli():
      - start/stop a VM
      - get state for a specific VM
     These functions are realized by calling into a specific helper function that
-    builds a server message and uses _get_server_data to communicate with the server.
-    The only JSON field that is mandatory at the moment is the "success" field,
-    it's absence is handled by the _get_server_data function by returning a "server_data_malformed"
-    string.
-    The _get_server_data function also handles the case when the server signals failure by printing
-    the relevant info and returning "server_command_failed".
-    Helper functions should check for these strings and act accordingly.
-    More specific failure modes should be handled by the specific functions.
-    These functions also inform the user about the result of their action (if it didn't run into
-    the error modes in _get_server_data).
-    The helper functions should return an exit code that is then surfaced all the way up to the
-    calling shell.
-    Malfunction of the server should always use exit codes > 100.
-    Malfunction of the client should always use exit codes < 100.
-    Keep in mind that argparse uses exit status 2 for errors in the cli arguments,
-    so don't use it for other stuff!
-
-    In the future, we'll need to drastically improve the control flow here,
-    starting with proper message parsing.
-    We should probably start with a messages class with json serialization / deserialization features.
-    But let's get some VMs off the ground first.
+    builds a server message and uses _server_action to communicate with the server.
+    We use the following return codes:
+    - 0: successful 2xx response
+    - 20: non-2xx response with valid protocol format
+    - 30: malformed/undecodable/schema-invalid server response
+    - 40: socket/transport failures (catch-all default)
+    Keep in mind that argparse uses exit status 2 for errors in the cli arguments.
     """
     parser = argparse.ArgumentParser(
         description="AnlasserCtl: CLI Interface for Anlasser"
@@ -145,24 +118,29 @@ def client_cli():
     loglevel = logging.DEBUG if cliargs.debug else logging.INFO
     logging.basicConfig(level=loglevel, format="%(asctime)s %(message)s")
 
-    if not Path(cliargs.socketpath).exists():
-        logging.error(f"No socket at {cliargs.socketpath}, abort")
-        return 1
-
-    # Keep in mind that argparse uses exit status 2 for errors in the cli arguments, so don't use it for other stuff
-    if cliargs.set_state:
-        returncode = _set_vm_state(
-            vm_name=cliargs.vm,
-            target_state=cliargs.set_state,
-            socket_path=cliargs.socketpath,
-        )
-    elif cliargs.get_state:
-        returncode = _get_vm_state(vm_name=cliargs.vm, socket_path=cliargs.socketpath)
-    elif cliargs.list_vms:
-        returncode = _list_vms(socket_path=cliargs.socketpath)
-    else:
-        logging.error("No known cli action selected. This code should be unreachable")
-        returncode = 9
+    returncode = 40
+    try:
+        if cliargs.set_state:
+            returncode = _set_vm_state(
+                vm_name=cliargs.vm,
+                target_state=cliargs.set_state,
+                socket_path=cliargs.socketpath,
+            )
+        elif cliargs.get_state:
+            returncode = _get_vm_state(
+                vm_name=cliargs.vm, socket_path=cliargs.socketpath
+            )
+        else:
+            returncode = _list_vms(socket_path=cliargs.socketpath)
+    except OSError as exc:
+        logging.error(f"Unable to communicate with server socket: {exc}")
+    except AnlasserInvalidResponseError as exc:
+        logging.error(f"Server returned malformed response: {exc}")
+        returncode = 30
+    except AnlasserCommandFailedError as exc:
+        logging.error("Server signalled command failure!")
+        logging.error(str(exc))
+        returncode = 20
     return returncode
 
 

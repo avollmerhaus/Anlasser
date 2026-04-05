@@ -5,13 +5,16 @@ from pathlib import Path
 
 from .sock_server import AnlasserSockServer
 from .errors import AnlasserInvalidActionError
-from .bhyve_driver import AnlasserBhyveDriver
+from .bhyve_controller import AnlasserBhyveController
+
 
 class AnlasserShutdown(Exception):
-    """ Used to stop the TaskGroup """    
+    """Used to stop the TaskGroup"""
+
     pass
 
-class AnlasserController:
+
+class AnlasserAgent:
     def __init__(self, vm_configs_dir, socket_path):
         self._vm_configs_dir = Path(vm_configs_dir)
         self._vms = dict()
@@ -29,6 +32,7 @@ class AnlasserController:
                 # That should land us in the default else block for
                 # invalid actions down below.
                 action = payload.get("action")
+                body = payload.get("body", {})
 
                 # Messages that make it into this part of the code are assumed to have passed schema verification.
                 # See ANLASSER_REQUEST_SCHEMA from messages.py
@@ -39,12 +43,12 @@ class AnlasserController:
 
                 if action == "set_vm_state":
                     logging.info("Dispatch: set_vm_state")
-                    vm_name = payload["vm_name"]
-                    target_state = payload["state"]
+                    vm_name = body["vm_name"]
+                    target_state = body["state"]
                     return await self.set_vm_state(vm_name, target_state)
 
                 if action == "get_vm_state":
-                    vm_name = payload["vm_name"]
+                    vm_name = body["vm_name"]
                     logging.info(f"Dispatch: get_vm_state {vm_name}")
                     state = "up" if vm_name in self._vms.keys() else "down"
                     return {"vm_state": state}
@@ -69,10 +73,10 @@ class AnlasserController:
         if target_state == "up":
             if vm_name in self._vms:
                 return True
-            vm = AnlasserBhyveDriver(vm_name)
+            vm = AnlasserBhyveController(vm_name)
             vm.load_config(self._vm_config_path(vm_name))
             task = self._tg.create_task(vm.run())
-            self._vms[vm_name] = {"task": task, "driver": vm}
+            self._vms[vm_name] = {"task": task, "controller": vm}
             task.add_done_callback(lambda _task: self._vms.pop(vm_name, None))
             return True
 

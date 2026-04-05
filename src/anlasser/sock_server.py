@@ -10,7 +10,7 @@ from .messages import (
 )
 from .errors import (
     AnlasserError,
-    AnlasserBhyveDriverError,
+    AnlasserBhyveControllerError,
     AnlasserInvalidActionError,
     AnlasserInvalidMessageError,
 )
@@ -89,49 +89,48 @@ class AnlasserSockServer:
         # - only AnlasserError and derived exceptions are to be raised by the agent or handled here,
         #   all other exceptions are considered bugs that should simply crash the code.
         # - if the callback returns, we assume the action to be completed without error and the result to be the action result
-        # - what that result might be depends on the action. For `set_vm_state``, it might be `None`. For `list_vms`, a list.
-        # - generate a response
+        # - result shape depends on the action (e.g. "ok" for set_vm_state, payload dicts for state/list operations)
+        # - generate a response with HTTP-like status code and a body:
+        #   {"status": 200, "body": {"response": {...}}}
+        #   {"status": 400, "body": {"error": "some message"}}
         # - run response through validator
         # - crash if it fails (that's a bug after all)
-        response = {"success": False}
+        response = {
+            "status": 500,
+            "body": {
+                "error": "Unhandled error",
+            },
+        }
         try:
             parsed_client_msg = parse_anlasser_request(raw_message)
-
-            # FIXME: How does this look like for an action like set vm state up?
-            # `{"success": True, "result": True}`
-            # That's kinda ugly, and what does it even mean?
-            # I think we're trying to communicate the right things here:
-            # - handling of the message was a success
-            # - the result of the request was a success
-            # But how do we name the keys appropriately?
-            # And isn't the absence of the "error" key enough to implicate success?
-            # Maybe it should be the other way around:
-            # Error should always be there.
-            # It should be True or False.
-            # Then we'd have a "data" field for the actual payload.
-            # Maybe we could even do it kind of like http here.
-            # Keys:
-            # - status: numeric code, like 200 for already running, 202 for started,
-            #   404 for VM config not found or something, 400 for bad request etc.
-            # - body: list of VMs, if requested. Or, in the future, other stuff, like VNC port.
-            #   But also error messages. The body should be machine-readable, so human-friendly messages
-            #   should probably be behind some key inside the body.
-            response["result"] = await self._handler(parsed_client_msg)
+            handler_result = await self._handler(parsed_client_msg)
+            if handler_result is True:
+                handler_result = "ok"
+            response = {
+                "status": 200,
+                "body": {"response": handler_result},
+            }
 
         except (AnlasserInvalidMessageError, AnlasserInvalidActionError) as exc:
             logging.warning(f"Client action failed: {exc}; message={raw_message!r}")
-            response["error"] = {"code": "invalid_request", "message": str(exc)}
+            response = {
+                "status": 400,
+                "body": {"error": str(exc)},
+            }
 
-        except AnlasserBhyveDriverError as exc:
+        except AnlasserBhyveControllerError as exc:
             logging.warning(f"Client action failed: {exc}")
-            response["error"] = {"code": "vm_error", "message": str(exc)}
+            response = {
+                "status": 400,
+                "body": {"error": str(exc)},
+            }
 
         except AnlasserError as exc:
             logging.warning(f"Client action failed: {exc}")
-            response["error"] = {"code": "internal_error", "message": str(exc)}
-
-        else:
-            response["success"] = True
+            response = {
+                "status": 500,
+                "body": {"error": str(exc)},
+            }
 
         validate_anlasser_response(response)
         return response

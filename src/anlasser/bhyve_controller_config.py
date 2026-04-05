@@ -2,11 +2,11 @@ import configparser
 import logging
 from pathlib import Path
 
-from .errors import AnlasserBhyveDriverError
+from .errors import AnlasserBhyveControllerError
 
 
-def load_bhyve_driver_config(vm, config_path):
-    logging.info(f"Trying to load bhyve driver config from {config_path}")
+def load_bhyve_controller_config(vm, config_path):
+    logging.info(f"Trying to load bhyve controller config from {config_path}")
     # We don't need to check if the config file actually exists.
     # config.read() will return an empty config for a nonexistent file, so we'll run into the KeyError handler.
     try:
@@ -35,17 +35,17 @@ def load_bhyve_driver_config(vm, config_path):
         if shutdown_timeout is not None:
             vm.shutdown_timeout = float(shutdown_timeout)
     except KeyError as e:
-        raise AnlasserBhyveDriverError(
-            f"Error loading bhyve driver config at {config_path}, missing key {e}"
+        raise AnlasserBhyveControllerError(
+            f"Error loading bhyve controller config at {config_path}, missing key {e}"
         )
     except ValueError as e:
-        raise AnlasserBhyveDriverError(
-            f"Error loading bhyve driver config at {config_path}, invalid value {e}"
+        raise AnlasserBhyveControllerError(
+            f"Error loading bhyve controller config at {config_path}, invalid value {e}"
         )
 
     if vm.name != Path(config_path).stem:
-        raise AnlasserBhyveDriverError(
-            f"Error loading bhyve driver config file at {config_path}, file name / VM name mismatch"
+        raise AnlasserBhyveControllerError(
+            f"Error loading bhyve controller config file at {config_path}, file name / VM name mismatch"
         )
 
     tap_config = f"{vm.tapdev},mac={vm.mac}" if vm.mac else f"{vm.tapdev}"
@@ -66,7 +66,11 @@ def load_bhyve_driver_config(vm, config_path):
         "bhyve",
         "-P",  # Force vCPU to exit when the guest issues a PAUSE instruction.
         "-A",  # Generate ACPI tables inside the guest.
-        "-D",  # Destroy the VM on guest-initiated shutdown.
+        # We intentionally do NOT pass "-D" here.
+        # "-D" only destroys /dev/vmm/<name> on guest-initiated poweroff (exit code 1).
+        # It does not cover reboots (0), errors (4), or external termination (SIGTERM).
+        # Instead, we unconditionally run `bhyvectl --destroy` after bhyve exits.
+        # See AnlasserBhyveController.run() for the cleanup logic.
         "-H",  # Yield vCPU when the guest issues HLT instructions. The vCPU uses 100% host CPU otherwise.
         "-w",  # Ignore access to "unspecified registers", vm-bhyve uses this. But "man bhyve" says "experimental"?
         "-c",
@@ -107,9 +111,7 @@ def load_bhyve_driver_config(vm, config_path):
     ]
 
     if vm.vnc_kbd_layout is not None:
-        vnc_kbd_layout_path = Path(
-            f"/usr/share/bhyve/kbdlayout/{vm.vnc_kbd_layout}"
-        )
+        vnc_kbd_layout_path = Path(f"/usr/share/bhyve/kbdlayout/{vm.vnc_kbd_layout}")
         if vnc_kbd_layout_path.is_file():
             # For VNC clients w/o QEMU extended key event support
             vm.bhyve_command.extend(["-K", f"{vnc_kbd_layout_path}"])
@@ -127,6 +129,4 @@ def load_bhyve_driver_config(vm, config_path):
     # VM name always has to be the last component of the bhyve command
     vm.bhyve_command.append(vm.name)
 
-    logging.info(
-        f"Successfully loaded config for VM {vm.name} from {config_path}"
-    )
+    logging.info(f"Successfully loaded config for VM {vm.name} from {config_path}")

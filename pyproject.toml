@@ -1,13 +1,13 @@
 [tool.poetry]
 name = "Anlasser"
-version = "0.1.0"
+version = "0.2.0"
 description = ""
 authors = ["Aljoscha Vollmerhaus <git@aljoscha.vollmerhaus.net>"]
 readme = "README.md"
 packages = [{include = "anlasser", from = "src"}]
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = "^3.11"
 jsonschema = "^4.23.0"
 
 [tool.poetry.group.test]

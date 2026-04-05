@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from anlasser import bhyve_driver_networking
+from anlasser import bhyve_controller_networking
 
 
 class FakeProc:
@@ -23,12 +23,10 @@ def test_wait_for_tap_device_creation_found(monkeypatch):
     async def fake_create_subprocess_exec(*args, **kwargs):
         return proc
 
-    monkeypatch.setattr(
-        asyncio, "create_subprocess_exec", fake_create_subprocess_exec
-    )
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
     assert asyncio.run(
-        bhyve_driver_networking.wait_for_tap_device_creation("tap0", timeout=0.1)
+        bhyve_controller_networking.wait_for_tap_device_creation("tap0", timeout=0.1)
     )
 
 
@@ -38,13 +36,11 @@ def test_wait_for_tap_device_creation_timeout(monkeypatch):
     async def fake_create_subprocess_exec(*args, **kwargs):
         return proc
 
-    monkeypatch.setattr(
-        asyncio, "create_subprocess_exec", fake_create_subprocess_exec
-    )
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
     with pytest.raises(TimeoutError):
         asyncio.run(
-            bhyve_driver_networking.wait_for_tap_device_creation("tap1", timeout=0.05)
+            bhyve_controller_networking.wait_for_tap_device_creation("tap1", timeout=0.05)
         )
 
 
@@ -54,13 +50,9 @@ def test_tap_operation_add_success(monkeypatch):
     async def fake_create_subprocess_exec(*args, **kwargs):
         return proc
 
-    monkeypatch.setattr(
-        asyncio, "create_subprocess_exec", fake_create_subprocess_exec
-    )
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
-    assert asyncio.run(
-        bhyve_driver_networking.tap_operation("add", "tap0", "bridge0")
-    )
+    assert asyncio.run(bhyve_controller_networking.tap_operation("add", "tap0", "bridge0"))
 
 
 def test_tap_operation_destroy_failure(monkeypatch):
@@ -69,10 +61,6 @@ def test_tap_operation_destroy_failure(monkeypatch):
     async def fake_create_subprocess_exec(*args, **kwargs):
         return proc
 
-    monkeypatch.setattr(
-        asyncio, "create_subprocess_exec", fake_create_subprocess_exec
-    )
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
-    assert not asyncio.run(
-        bhyve_driver_networking.tap_operation("destroy", "tap0")
-    )
+    assert not asyncio.run(bhyve_controller_networking.tap_operation("destroy", "tap0"))

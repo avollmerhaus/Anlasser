@@ -2,13 +2,13 @@ import pytest
 
 from pathlib import Path
 
-from anlasser.bhyve_driver import AnlasserBhyveDriver
-from anlasser.errors import AnlasserBhyveDriverError
+from anlasser.bhyve_controller import AnlasserBhyveController
+from anlasser.errors import AnlasserBhyveControllerError
 
 
 def test_load_config_sets_minimal_bhyve_command(tmp_path):
     vm_name = "testvm1"
-    vm = AnlasserBhyveDriver(vm_name)
+    vm = AnlasserBhyveController(vm_name)
     config_path = Path(tmp_path, f"{vm_name}.ini")
     uefi_vars_path = f"/tank/VMs/{vm_name}/BHYVE_UEFI_VARS.fd"
     config_path.write_text(
@@ -43,9 +43,9 @@ def test_load_config_sets_minimal_bhyve_command(tmp_path):
 
 def test_load_config_missing_key(tmp_path):
     vm_name = "testvm1"
-    vm = AnlasserBhyveDriver(vm_name)
+    vm = AnlasserBhyveController(vm_name)
     config_path = Path(tmp_path, f"{vm_name}.ini")
     config_path.write_text("[VM]\nname = testvm1\n", encoding="utf-8")
 
-    with pytest.raises(AnlasserBhyveDriverError):
+    with pytest.raises(AnlasserBhyveControllerError):
         vm.load_config(config_path)
