@@ -20,11 +20,6 @@ def load_bhyve_controller_config(vm, config_path):
         vm.cpu_threads = config["VM"]["cpu_threads"]
         vm.storage_path = config["VM"]["storage_path"]
         vm.uefi_vars_storage_path = config["VM"]["uefi_vars_storage_path"]
-        # If no mac is set we let Bhyve generate one.
-        vm.mac = config["VM"].get("mac", None)
-        # FIXME: Handle tap devices internally, stop bothering the user!
-        vm.tapdev = config["VM"]["tapdev"]
-        vm.bridge = config["VM"]["bridge"]
         # FIXME: Handle vnc ports internally, stop bothering the user!
         vm.vnc_port = config["VM"]["vnc_port"]
         # vnc_wait_connect has to be a string, we want to use str.lower later in the code.
@@ -48,21 +43,39 @@ def load_bhyve_controller_config(vm, config_path):
             f"Error loading bhyve controller config file at {config_path}, file name / VM name mismatch"
         )
 
-    tap_config = f"{vm.tapdev},mac={vm.mac}" if vm.mac else f"{vm.tapdev}"
+    # Parse NIC sections (NIC.0, NIC.1, ...)
+    # Zero NIC sections is valid (VM with no networking).
+    nic_sections = sorted(s for s in config.sections() if s.startswith("NIC."))
+    vm.nics = {}
+    for section in nic_sections:
+        try:
+            bridge = config[section]["bridge"]
+        except KeyError:
+            raise AnlasserBhyveControllerError(
+                f"Error loading bhyve controller config at {config_path}, "
+                f"section [{section}] is missing required key 'bridge'"
+            )
+        mac = config[section].get("mac", None)
+        vm.nics[section] = {"bridge": bridge, "mac": mac}
 
-    # Maybe the hardcoded stuff here should probably be configurable, too.
+    logging.info(f"Successfully loaded config for VM {vm.name} from {config_path}")
+
+
+def build_bhyve_command(vm):
+    """Build the full bhyve command list from vm config.
+    Call this after tap devices have been created (vm.tapdevs must be populated).
+    """
+    # FIXME: Maybe the hardcoded stuff here should probably be configurable, too.
     vnc_listen = f"127.0.0.1:{vm.vnc_port}"
     vnc_resolution = "w=1600,h=900"
+    vnc_config = f"tcp={vnc_listen},{vnc_resolution}"
     if vm.vnc_wait_connect.lower() in ("y", "yes", "true", "on", "1"):
-        vnc_wait_parameter = ",wait"
-    else:
-        vnc_wait_parameter = ""
-    vnc_config = f"tcp={vnc_listen},{vnc_resolution}{vnc_wait_parameter}"
+        vnc_config += ",wait"
 
-    vm.bhyve_command = [
-        # Keep in mind that slot numbers for `-s` options are magic in the sense that
-        # guest OS, especially windows, might be picky about what device is in what slot.
-        # I tried to copy the slot numbers from `churchers/vm-bhyve`.
+    # Keep in mind that slot numbers for `-s` options are magic in the sense that
+    # guest OS, especially Windows, might be picky about what device is in what slot.
+    # I tried to copy the slot numbers from `churchers/vm-bhyve`.
+    command = [
         "bhyve",
         "-P",  # Force vCPU to exit when the guest issues a PAUSE instruction.
         "-A",  # Generate ACPI tables inside the guest.
@@ -72,7 +85,7 @@ def load_bhyve_controller_config(vm, config_path):
         # Instead, we unconditionally run `bhyvectl --destroy` after bhyve exits.
         # See AnlasserBhyveController.run() for the cleanup logic.
         "-H",  # Yield vCPU when the guest issues HLT instructions. The vCPU uses 100% host CPU otherwise.
-        "-w",  # Ignore access to "unspecified registers", vm-bhyve uses this. But "man bhyve" says "experimental"?
+        "-w",  # Ignore access to "unspecified registers", vm-bhyve uses this. But "man bhyve" says "debug"?
         "-c",
         f"sockets={vm.cpu_sockets},cores={vm.cpu_cores},threads={vm.cpu_threads}",
         "-m",
@@ -88,8 +101,6 @@ def load_bhyve_controller_config(vm, config_path):
         # But in theory, both the host and the guest have a disk cache. It's a waste to engage them both I guess?
         # See "man bhyve" for (very terse) info on direct,nocache".
         f"4,nvme,{vm.storage_path},sectsz=4096",  # FIXME: are these parameters optimal?
-        "-s",
-        f"5,virtio-net,{tap_config}",
         "-s",
         f"6,fbuf,{vnc_config}",
         "-s",
@@ -110,11 +121,19 @@ def load_bhyve_controller_config(vm, config_path):
         f"bootrom,/usr/local/share/uefi-firmware/BHYVE_UEFI.fd,{vm.uefi_vars_storage_path}",
     ]
 
+    # NIC slots use multi-function on slot 5 (5:0, 5:1, ...).
+    # This is the approach shown in the bhyve(8) man page.
+    for i, (nic_name, nic) in enumerate(vm.nics.items()):
+        tap_config = vm.tapdevs[nic_name]
+        if nic["mac"]:
+            tap_config += f",mac={nic['mac']}"
+        command.extend(["-s", f"5:{i},virtio-net,{tap_config}"])
+
     if vm.vnc_kbd_layout is not None:
         vnc_kbd_layout_path = Path(f"/usr/share/bhyve/kbdlayout/{vm.vnc_kbd_layout}")
         if vnc_kbd_layout_path.is_file():
             # For VNC clients w/o QEMU extended key event support
-            vm.bhyve_command.extend(["-K", f"{vnc_kbd_layout_path}"])
+            command.extend(["-K", f"{vnc_kbd_layout_path}"])
         else:
             logging.warning(
                 f"No VNC keyboard layout file at {vnc_kbd_layout_path}, ignoring layout"
@@ -124,9 +143,9 @@ def load_bhyve_controller_config(vm, config_path):
 
     if vm.iso_path is not None:
         # Some OS seem to be picky and want disk devices or dvds only in slots 3 to 6.
-        vm.bhyve_command.extend(["-s", f"3,ahci-cd,{vm.iso_path}"])
+        command.extend(["-s", f"3,ahci-cd,{vm.iso_path}"])
 
     # VM name always has to be the last component of the bhyve command
-    vm.bhyve_command.append(vm.name)
+    command.append(vm.name)
 
-    logging.info(f"Successfully loaded config for VM {vm.name} from {config_path}")
+    return command

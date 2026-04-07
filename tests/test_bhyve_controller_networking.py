@@ -17,50 +17,76 @@ class FakeProc:
         return self.returncode
 
 
-def test_wait_for_tap_device_creation_found(monkeypatch):
-    proc = FakeProc(stdout=b"lo0 em0 bridge0 tap0\n", returncode=0)
+def test_add_tap_creates_and_bridges(monkeypatch):
+    calls = []
 
     async def fake_create_subprocess_exec(*args, **kwargs):
-        return proc
+        calls.append(args)
+        if args[:3] == ("ifconfig", "tap", "create"):
+            return FakeProc(stdout=b"tap3\n", returncode=0)
+        # description and bridge-add calls
+        return FakeProc(returncode=0)
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
-    assert asyncio.run(
-        bhyve_controller_networking.wait_for_tap_device_creation("tap0", timeout=0.1)
+    result = asyncio.run(
+        bhyve_controller_networking.add_tap("testvm1", "bridge0")
     )
+    assert result == "tap3"
+    assert calls[0] == ("ifconfig", "tap", "create")
+    assert calls[1] == ("ifconfig", "tap3", "up", "description", "anlasser-vm-testvm1")
+    assert calls[2] == ("ifconfig", "bridge0", "addm", "tap3")
 
 
-def test_wait_for_tap_device_creation_timeout(monkeypatch):
-    proc = FakeProc(stdout=b"lo0 em0 bridge0\n", returncode=0)
-
+def test_add_tap_fails_on_tap_creation(monkeypatch):
     async def fake_create_subprocess_exec(*args, **kwargs):
-        return proc
+        return FakeProc(returncode=1)
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
-    with pytest.raises(TimeoutError):
+    with pytest.raises(RuntimeError):
         asyncio.run(
-            bhyve_controller_networking.wait_for_tap_device_creation("tap1", timeout=0.05)
+            bhyve_controller_networking.add_tap("testvm1", "bridge0")
         )
 
 
-def test_tap_operation_add_success(monkeypatch):
-    proc = FakeProc(returncode=0)
+def test_add_tap_fails_on_bridge_add(monkeypatch):
+    calls = []
 
     async def fake_create_subprocess_exec(*args, **kwargs):
-        return proc
+        calls.append(args)
+        if args[:3] == ("ifconfig", "tap", "create"):
+            return FakeProc(stdout=b"tap0\n", returncode=0)
+        if "addm" in args:
+            return FakeProc(returncode=1)
+        return FakeProc(returncode=0)
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
-    assert asyncio.run(bhyve_controller_networking.tap_operation("add", "tap0", "bridge0"))
+    with pytest.raises(RuntimeError):
+        asyncio.run(
+            bhyve_controller_networking.add_tap("testvm1", "bridge0")
+        )
 
 
-def test_tap_operation_destroy_failure(monkeypatch):
-    proc = FakeProc(returncode=1)
-
+def test_destroy_tap_success(monkeypatch):
     async def fake_create_subprocess_exec(*args, **kwargs):
-        return proc
+        return FakeProc(returncode=0)
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
-    assert not asyncio.run(bhyve_controller_networking.tap_operation("destroy", "tap0"))
+    asyncio.run(
+        bhyve_controller_networking.destroy_tap("tap0")
+    )
+
+
+def test_destroy_tap_failure(monkeypatch):
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        return FakeProc(returncode=1)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(
+            bhyve_controller_networking.destroy_tap("tap0")
+        )

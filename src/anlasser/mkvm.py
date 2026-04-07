@@ -12,14 +12,15 @@ cpu_cores = 2
 cpu_threads = 1
 storage_path = {disk_image_path}
 uefi_vars_storage_path = {uefi_vars_path}
-tapdev = tap0
-bridge = bridge0
-mac = 02:00:00:00:02:01
 # See /usr/share/bhyve/kbdlayout for a list of valid layouts
 vnc_kbd_layout = de_noacc
 vnc_port = 5900
 # vnc_wait_connect = true
 iso_path = /path/to/linux_iso.iso
+
+[NIC.0]
+bridge = bridge0
+mac = 02:00:00:00:02:01
 """
     with open(config_file_path, "w", encoding="utf-8") as config_file:
         config_file.write(ini_content)

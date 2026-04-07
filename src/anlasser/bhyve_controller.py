@@ -2,11 +2,8 @@ import asyncio
 import logging
 from pathlib import Path
 
-from .bhyve_controller_config import load_bhyve_controller_config
-from .bhyve_controller_networking import (
-    tap_operation,
-    wait_for_tap_device_creation,
-)
+from .bhyve_controller_config import load_bhyve_controller_config, build_bhyve_command
+from .bhyve_controller_networking import add_tap, destroy_tap
 
 from .errors import AnlasserBhyveControllerError
 
@@ -23,18 +20,13 @@ class AnlasserBhyveController:
         self.cpu_threads = None
         self.storage_path = None
         self.uefi_vars_storage_path = None
-        self.mac = None
-        self.tapdev = None
-        self.bridge = None
+        self.nics = {}
+        self.tapdevs = {}
         self.vnc_port = None
         self.vnc_kbd_layout = None
         self.vnc_wait_connect = None
         self.iso_path = None
-        self.bhyve_command = None
         self.shutdown_timeout = 90
-
-        # Runtime state
-        self._bootstrap_done = False
 
     def load_config(self, config_path):
         load_bhyve_controller_config(self, config_path)
@@ -61,29 +53,18 @@ class AnlasserBhyveController:
             logging.error(f"VM {self.name}: bhyvectl --destroy exited with rc={rc}")
 
     async def _network_setup(self):
-        if self._bootstrap_done:
-            return True
-
-        try:
-            await wait_for_tap_device_creation(self.tapdev)
-        except TimeoutError as exc:
-            logging.error(f"VM {self.name}: {exc}")
-            return False
-        if await tap_operation("add", self.tapdev, self.bridge):
-            # FIXME: this assumes a single tap device
-            self._bootstrap_done = True
-            return True
-        return False
+        """Create tap devices and add them to their bridges.
+        Raises on failure — caller should not start bhyve.
+        """
+        for nic_name, nic in self.nics.items():
+            self.tapdevs[nic_name] = await add_tap(self.name, nic["bridge"])
 
     async def _network_teardown(self):
-        if not self._bootstrap_done:
-            logging.info(f"VM {self.name}: No network teardown necessary")
-            return True
-
-        if await tap_operation("destroy", self.tapdev):
-            self._bootstrap_done = False
-            return True
-        return False
+        for tapdev in self.tapdevs.values():
+            try:
+                await destroy_tap(tapdev)
+            except RuntimeError as exc:
+                logging.error(f"VM {self.name}: {exc}")
 
     async def _stop_bhyve(self, proc):
         if proc is None or proc.returncode is not None:
@@ -119,50 +100,44 @@ class AnlasserBhyveController:
 
     async def run(self):
         proc = None
+
+        # Bhyve exit codes (man bhyve):
+        bhyve_exit = {
+            0: "reboot",
+            1: "ordinary shutdown",
+            2: "halted (abnormal)",
+            3: "triple fault (abnormal)",
+            4: "error (abnormal)",
+        }
+
         try:
-            if self.bhyve_command is None:
-                raise RuntimeError(
-                    "run() invoked w/o config. You have to load a config using load_config() first."
-                )
             if Path(f"/dev/vmm/{self.name}").exists():
                 raise AnlasserBhyveControllerError(
                     f"VM {self.name}: Refusing to start, device node /dev/vmm/{self.name} already exists. "
                     "This indicates a stale or still-running VM context. If you are sure the VM is not running, "
                     f"clean it up with: bhyvectl --destroy --vm={self.name}"
                 )
-            # Let's initialize into the reboot state. We break out when bhyve sets a different exit code.
-            rc = 0
-            while rc == 0:
-                if self._bootstrap_done:
-                    logging.info(f"VM {self.name}: exit 0, reboot")
-                else:
-                    logging.info(f"Starting VM {self.name}")
+
+            await self._network_setup()
+            bhyve_command = build_bhyve_command(self)
+
+            logging.info(f"Starting VM {self.name}")
+            while True:
                 proc = await asyncio.create_subprocess_exec(
-                    *self.bhyve_command,
+                    *bhyve_command,
                     start_new_session=True,
                 )
                 logging.info(f"VM {self.name}: Subprocess started, pid={proc.pid}")
-                if not self._bootstrap_done:
-                    await self._network_setup()
                 rc = await proc.wait()
-                logging.info(f"VM {self.name}: Subprocess exited, rc={rc}")
+                logging.info(
+                    f"VM {self.name}: Bhyve exit {rc}, "
+                    + bhyve_exit.get(rc, "unknown (abnormal)")
+                )
+                if rc > 0:
+                    break
                 # Prevent runaway load should we somehow get into an infinite loop,
                 # with bhyve constantly exiting with status 0.
                 await asyncio.sleep(0.5)
-            # Bhyve exit codes (man bhyve):
-            # 0 - reboot
-            # 1 - power off
-            # 2 - halted
-            # 3 - triple fault
-            # 4 - exited due to an error
-            if rc == 0:
-                logging.info(
-                    "Bhyve exit status 0 (ordinary reboot), starting new process"
-                )
-            elif rc == 1:
-                logging.info("Bhyve exit status 1 (ordinary shutdown), not restarting")
-            else:
-                logging.info(f"Bhyve exit status {rc}, not restarting")
         except asyncio.CancelledError:
             logging.info(f"VM {self.name} pid={proc.pid} cancelled, shutting down")
             await self._stop_bhyve(proc)

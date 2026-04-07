@@ -2,60 +2,67 @@ import asyncio
 import logging
 
 
-async def wait_for_tap_device_creation(tapdev_name, timeout=5.0):
-    # FIXME: Instead of doing this dance, we should create the tap devices by ourselves.
-    # ourselves. Think {"myvm1": ["tap0, "tap1"]}.
-    # Or maybe {"tap0": "myvm1", "tap1": "myvm1", "tap2": "myvm2",}
-    # Or maybe even just a list?
-    # tap_interfaces = ["myvm1", "myvm1", "myvm2"]
-    # The list index would then become the N in tapN.
-    # In order to support multiple bridges, we'd need to store the associated bridge as well...
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    logging.info(f"Waiting {timeout}s for tap device {tapdev_name} to appear")
-    while loop.time() < deadline:
-        proc = await asyncio.create_subprocess_exec(
-            "ifconfig",
-            "-l",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            start_new_session=True,
+async def _create_tap(vm_name):
+    """Create a tap device and set its description to the VM name.
+    Returns the tap device name (e.g. "tap0").
+    """
+    proc = await asyncio.create_subprocess_exec(
+        "ifconfig",
+        "tap",
+        "create",
+        stdout=asyncio.subprocess.PIPE,
+        start_new_session=True,
+    )
+    stdout, _ = await proc.communicate()
+    if proc.returncode != 0:
+        raise RuntimeError(f"Failed to create tap device (rc={proc.returncode})")
+    tapdev_name = stdout.decode("utf-8").strip()
+    logging.info(f"VM {vm_name}: Created tap device {tapdev_name}")
+
+    # Bring up and tag the tap device so `ifconfig` shows which VM it belongs to.
+    # Setting "up" here means we don't need the net.link.tap.up_on_open sysctl.
+    proc = await asyncio.create_subprocess_exec(
+        "ifconfig",
+        tapdev_name,
+        "up",
+        "description",
+        f"anlasser-vm-{vm_name}",
+        start_new_session=True,
+    )
+    rc = await proc.wait()
+    if rc != 0:
+        logging.warning(
+            f"VM {vm_name}: Failed to configure {tapdev_name} (rc={rc})"
         )
-        stdout, _ = await proc.communicate()
-        if proc.returncode == 0:
-            available_interfaces = stdout.decode("utf-8").split()
-            if tapdev_name in available_interfaces:
-                logging.info(f"{tapdev_name}: tap device has been created")
-                return True
-        await asyncio.sleep(0.2)
-    raise TimeoutError(f"Timeout waiting for tap device {tapdev_name} to appear")
+
+    return tapdev_name
 
 
-async def tap_operation(action, tapdev_name, bridge_name=None):
+async def add_tap(vm_name, bridge_name):
+    """Create a tap device and add it to a bridge.
+    Returns the tap device name.
     """
-    We should add capability for multiple tap devices here.
-    Maybe simply loop through them.
-
-    :param action: "add" or "destroy"
-    """
-    ifconfig_commands = {
-        "add": ["ifconfig", bridge_name, "addm", tapdev_name],
-        "destroy": ["ifconfig", tapdev_name, "destroy"],
-    }
-
-    command = ifconfig_commands[action]
+    tapdev_name = await _create_tap(vm_name)
+    command = ["ifconfig", bridge_name, "addm", tapdev_name]
     logging.info(f"Running command: {command}")
     proc = await asyncio.create_subprocess_exec(
         *command,
         start_new_session=True,
     )
     rc = await proc.wait()
-    if rc > 0:
-        # Originally I tried to shut the VM down in case I was unable to add a tap device to a bridge,
-        # but that just complicates things.
-        # Sending SIGTERM to bhyve mere seconds after starting while the VM might still be booting probably
-        # won't do us any good. So log the error and let the user deal with the problem,
-        # they can shut the VM down if so desired.
-        logging.error(f"Error running ifconfig: {rc}")
-        return False
-    return True
+    if rc != 0:
+        raise RuntimeError(f"ifconfig add failed for {tapdev_name} (rc={rc})")
+    return tapdev_name
+
+
+async def destroy_tap(tapdev_name):
+    """Destroy a tap device."""
+    command = ["ifconfig", tapdev_name, "destroy"]
+    logging.info(f"Running command: {command}")
+    proc = await asyncio.create_subprocess_exec(
+        *command,
+        start_new_session=True,
+    )
+    rc = await proc.wait()
+    if rc != 0:
+        raise RuntimeError(f"ifconfig destroy failed for {tapdev_name} (rc={rc})")

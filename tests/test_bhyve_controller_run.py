@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from anlasser import bhyve_controller as bhyve_controller_module
 from anlasser.bhyve_controller import AnlasserBhyveController
 from anlasser.errors import AnlasserBhyveControllerError
 
@@ -87,8 +88,12 @@ class RunHarness:
 
         self.vm = AnlasserBhyveController(vm_name)
 
-        # The object's run function expects `bhyve_command` to be set.
-        self.vm.bhyve_command = ["bhyve"]
+        # Fake build_bhyve_command so run() doesn't need a real config
+        monkeypatch.setattr(
+            bhyve_controller_module,
+            "build_bhyve_command",
+            lambda vm: ["bhyve", vm.name],
+        )
 
         async def fake_create_subprocess_exec(*args, **kwargs):
             self.spawn_calls += 1
@@ -106,13 +111,9 @@ class RunHarness:
 
     async def fake_network_setup(self):
         self.network_setup_calls += 1
-        self.vm._bootstrap_done = True
-        return True
 
     async def fake_network_teardown(self):
         self.network_teardown_calls += 1
-        self.vm._bootstrap_done = False
-        return True
 
     async def fake_destroy_vmm_device_node(self):
         self.destroy_vmm_calls += 1
@@ -229,3 +230,21 @@ def test_controller_kills_hung_bhyve(run_harness):
     assert proc.terminate_called == 1
     # Assert kill was called after that was not successful
     assert proc.kill_called == 1
+
+
+# Intention: verify that a failed network setup prevents bhyve from starting.
+# Expected outcome: RuntimeError propagates, no bhyve process is spawned.
+def test_controller_does_not_start_bhyve_on_network_failure(run_harness):
+    run_harness.procs.append(FakeProc())
+
+    async def failing_network_setup():
+        raise RuntimeError("tap creation failed")
+
+    run_harness.vm._network_setup = failing_network_setup
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(run_harness.vm.run())
+
+    assert run_harness.spawn_calls == 0
+    # Teardown must still run (finally block) to clean up partially created tap devices
+    assert run_harness.network_teardown_calls == 1
