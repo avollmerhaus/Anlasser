@@ -37,23 +37,23 @@ class AnlasserAgent:
                 # Messages that make it into this part of the code are assumed to have passed schema verification.
                 # See ANLASSER_REQUEST_SCHEMA from messages.py
                 if action == "list_vms":
-                    logging.info("Dispatch: list_vms")
+                    logging.info("Dispatch action: list_vms")
                     vm_list = [name for name in sorted(self._vms.keys())]
                     return {"vm_list": vm_list}
 
                 if action == "set_vm_state":
-                    logging.info("Dispatch: set_vm_state")
+                    logging.info("Dispatch action: set_vm_state")
                     vm_name = body["vm_name"]
                     target_state = body["state"]
                     return await self.set_vm_state(vm_name, target_state)
 
                 if action == "get_vm_state":
                     vm_name = body["vm_name"]
-                    logging.info(f"Dispatch: get_vm_state {vm_name}")
+                    logging.info(f"Dispatch action: get_vm_state {vm_name}")
                     state = "up" if vm_name in self._vms.keys() else "down"
                     return {"vm_state": state}
 
-                logging.warning(f"Dispatch: Invalid action: '{action}'")
+                logging.warning(f"Dispatch action: Invalid action: '{action}'")
                 raise AnlasserInvalidActionError(f"Invalid action '{action}'")
 
             except asyncio.CancelledError:

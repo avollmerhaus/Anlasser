@@ -29,9 +29,7 @@ def test_add_tap_creates_and_bridges(monkeypatch):
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
-    result = asyncio.run(
-        bhyve_controller_networking.add_tap("testvm1", "bridge0")
-    )
+    result = asyncio.run(bhyve_controller_networking.add_tap("testvm1", "bridge0"))
     assert result == "tap3"
     assert calls[0] == ("ifconfig", "tap", "create")
     assert calls[1] == ("ifconfig", "tap3", "up", "description", "anlasser-vm-testvm1")
@@ -45,9 +43,7 @@ def test_add_tap_fails_on_tap_creation(monkeypatch):
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
     with pytest.raises(RuntimeError):
-        asyncio.run(
-            bhyve_controller_networking.add_tap("testvm1", "bridge0")
-        )
+        asyncio.run(bhyve_controller_networking.add_tap("testvm1", "bridge0"))
 
 
 def test_add_tap_fails_on_bridge_add(monkeypatch):
@@ -64,9 +60,7 @@ def test_add_tap_fails_on_bridge_add(monkeypatch):
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
     with pytest.raises(RuntimeError):
-        asyncio.run(
-            bhyve_controller_networking.add_tap("testvm1", "bridge0")
-        )
+        asyncio.run(bhyve_controller_networking.add_tap("testvm1", "bridge0"))
 
 
 def test_destroy_tap_success(monkeypatch):
@@ -75,9 +69,7 @@ def test_destroy_tap_success(monkeypatch):
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
-    asyncio.run(
-        bhyve_controller_networking.destroy_tap("tap0")
-    )
+    asyncio.run(bhyve_controller_networking.destroy_tap("tap0"))
 
 
 def test_destroy_tap_failure(monkeypatch):
@@ -87,6 +79,4 @@ def test_destroy_tap_failure(monkeypatch):
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
     with pytest.raises(RuntimeError):
-        asyncio.run(
-            bhyve_controller_networking.destroy_tap("tap0")
-        )
+        asyncio.run(bhyve_controller_networking.destroy_tap("tap0"))

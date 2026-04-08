@@ -31,9 +31,7 @@ async def _create_tap(vm_name):
     )
     rc = await proc.wait()
     if rc != 0:
-        logging.warning(
-            f"VM {vm_name}: Failed to configure {tapdev_name} (rc={rc})"
-        )
+        logging.warning(f"VM {vm_name}: Failed to configure {tapdev_name} (rc={rc})")
 
     return tapdev_name
 
