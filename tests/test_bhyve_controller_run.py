@@ -78,6 +78,7 @@ class RunHarness:
     def __init__(
         self,
         monkeypatch,
+        tmp_path,
         vm_name="testvm1",
     ):
         self.network_setup_calls = 0
@@ -93,6 +94,13 @@ class RunHarness:
             bhyve_controller_module,
             "build_bhyve_command",
             lambda vm: ["bhyve", vm.name],
+        )
+
+        # Redirect bhyve log output to a temp directory
+        monkeypatch.setattr(
+            bhyve_controller_module,
+            "BHYVE_LOG_DIR",
+            tmp_path,
         )
 
         async def fake_create_subprocess_exec(*args, **kwargs):
@@ -134,9 +142,9 @@ class RunHarness:
 
 
 @pytest.fixture
-def run_harness(monkeypatch):
+def run_harness(monkeypatch, tmp_path):
     # Fixture needs to be an instance of the class
-    return RunHarness(monkeypatch)
+    return RunHarness(monkeypatch, tmp_path)
 
 
 # Intention: verify run() respawns Bhyve on exit 0 and stops on exit 1.

@@ -7,6 +7,8 @@ from .bhyve_controller_networking import add_tap, destroy_tap
 
 from .errors import AnlasserBhyveControllerError
 
+BHYVE_LOG_DIR = Path("/var/log/anlasser")
+
 
 class AnlasserBhyveController:
     """Bhyve VM controller."""
@@ -18,13 +20,13 @@ class AnlasserBhyveController:
         self.cpu_sockets = None
         self.cpu_cores = None
         self.cpu_threads = None
-        self.storage_path = None
+        self.disks = []
         self.uefi_vars_storage_path = None
         self.nics = {}
         self.tapdevs = {}
         self.vnc_port = None
         self.vnc_kbd_layout = None
-        self.vnc_wait_connect = None
+        self.vnc_wait_connect = False
         self.iso_path = None
         self.shutdown_timeout = 90
 
@@ -68,13 +70,12 @@ class AnlasserBhyveController:
 
     async def _stop_bhyve(self, proc):
         if proc is None or proc.returncode is not None:
-            # FIXME: this if condition is an inelegant mess.
-            # We could simplify, but maybe we should remove it altogether?
-            # Shouldn't the controller have made sure that we've been removed from the list
-            # of running VMs if we have no proc or it's done?
-            # There could be a miniscule race condition if _stop is called while we're initializing
-            # a VM object. Maybe we should guard against that with a simple mechanism here.
-            # We also need to have a test that makes sure the callback is effective, I guess.
+            # FIXME: Consider simplifying or removing this guard entirely.
+            # The only caller is the CancelledError handler in run(), where proc is
+            # almost certainly still running. The "already exited" window is a tiny
+            # race between proc.wait() returning and the cancellation landing.
+            # This guard is a safety net for a near-impossible scenario — it might
+            # not be worth the complexity.
             logging.warning(
                 f"VM {self.name}: Not running (proc={'none' if proc is None else 'done'}, rc={None if proc is None else proc.returncode})"
             )
@@ -121,23 +122,30 @@ class AnlasserBhyveController:
             await self._network_setup()
             bhyve_command = build_bhyve_command(self)
 
-            logging.info(f"Starting VM {self.name}")
-            while True:
-                proc = await asyncio.create_subprocess_exec(
-                    *bhyve_command,
-                    start_new_session=True,
-                )
-                logging.info(f"VM {self.name}: Subprocess started, pid={proc.pid}")
-                rc = await proc.wait()
-                logging.info(
-                    f"VM {self.name}: Bhyve exit {rc}, "
-                    + bhyve_exit.get(rc, "unknown (abnormal)")
-                )
-                if rc > 0:
-                    break
-                # Prevent runaway load should we somehow get into an infinite loop,
-                # with bhyve constantly exiting with status 0.
-                await asyncio.sleep(0.5)
+            bhyve_log_path = BHYVE_LOG_DIR / f"bhyve_{self.name}.log"
+            logging.info(f"Starting VM {self.name}, bhyve output → {bhyve_log_path}")
+            bhyve_log = open(bhyve_log_path, "a")
+            try:
+                while True:
+                    proc = await asyncio.create_subprocess_exec(
+                        *bhyve_command,
+                        start_new_session=True,
+                        stdout=bhyve_log,
+                        stderr=bhyve_log,
+                    )
+                    logging.info(f"VM {self.name}: Subprocess started, pid={proc.pid}")
+                    rc = await proc.wait()
+                    logging.info(
+                        f"VM {self.name}: Bhyve exit {rc}, "
+                        + bhyve_exit.get(rc, "unknown (abnormal)")
+                    )
+                    if rc > 0:
+                        break
+                    # Prevent runaway load should we somehow get into an infinite loop,
+                    # with bhyve constantly exiting with status 0.
+                    await asyncio.sleep(0.5)
+            finally:
+                bhyve_log.close()
         except asyncio.CancelledError:
             logging.info(f"VM {self.name} pid={proc.pid} cancelled, shutting down")
             await self._stop_bhyve(proc)

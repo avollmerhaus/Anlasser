@@ -1,5 +1,9 @@
 import argparse
+import json
 import logging
+import sys
+
+from tabulate import tabulate
 
 import anlasser.client as Client
 from anlasser import __version__ as anlasser_version
@@ -23,29 +27,39 @@ def _server_action(socket_path, data):
     return server_json
 
 
-def _set_vm_state(vm_name, target_state, socket_path):
+def _set_vm_state(vm_name, target_state, socket_path, output_json=False):
     msg = {
         "action": "set_vm_state",
         "body": {"state": target_state, "vm_name": vm_name},
     }
     _server_action(socket_path=socket_path, data=msg)
-    logging.info(f"VM {vm_name} set to state {target_state}")
+    if output_json:
+        print(json.dumps({"vm_name": vm_name, "state": target_state}))
     return 0
 
 
-def _get_vm_state(vm_name, socket_path):
+def _get_vm_state(vm_name, socket_path, output_json=False):
     msg = {"action": "get_vm_state", "body": {"vm_name": vm_name}}
     server_json = _server_action(socket_path=socket_path, data=msg)
     state = server_json["body"]["response"]["vm_state"]
-    logging.info(f"VM {vm_name} is {state}")
+    if output_json:
+        print(json.dumps({"vm_name": vm_name, "state": state}))
+    else:
+        print(tabulate([[vm_name, state]], headers=["VM", "State"]))
     return 0
 
 
-def _list_vms(socket_path):
+def _list_vms(socket_path, output_json=False):
     msg = {"action": "list_vms", "body": {}}
     server_json = _server_action(socket_path=socket_path, data=msg)
-    result = server_json["body"]["response"]
-    logging.info(result.get("vm_list", []))
+    vm_list = server_json["body"]["response"].get("vm_list", [])
+    if output_json:
+        print(json.dumps({"vm_list": vm_list}))
+    else:
+        if not vm_list:
+            print("No VMs running")
+        else:
+            print(tabulate([[vm, "up"] for vm in vm_list], headers=["VM", "State"]))
     return 0
 
 
@@ -96,6 +110,14 @@ def client_cli():
         "--vm", metavar="myvm", type=str, required=False, help="The VM to work on"
     )
     parser.add_argument(
+        "--json",
+        dest="output_json",
+        action="store_true",
+        required=False,
+        default=False,
+        help="Output in JSON format",
+    )
+    parser.add_argument(
         "--debug",
         dest="debug",
         action="store_true",
@@ -116,7 +138,9 @@ def client_cli():
         parser.error("Setting or getting the VM state needs a VM name")
 
     loglevel = logging.DEBUG if cliargs.debug else logging.INFO
-    logging.basicConfig(level=loglevel, format="%(asctime)s %(message)s")
+    logging.basicConfig(
+        level=loglevel, format="%(asctime)s %(message)s", stream=sys.stderr
+    )
 
     returncode = 40
     try:
@@ -125,13 +149,19 @@ def client_cli():
                 vm_name=cliargs.vm,
                 target_state=cliargs.set_state,
                 socket_path=cliargs.socketpath,
+                output_json=cliargs.output_json,
             )
         elif cliargs.get_state:
             returncode = _get_vm_state(
-                vm_name=cliargs.vm, socket_path=cliargs.socketpath
+                vm_name=cliargs.vm,
+                socket_path=cliargs.socketpath,
+                output_json=cliargs.output_json,
             )
         else:
-            returncode = _list_vms(socket_path=cliargs.socketpath)
+            returncode = _list_vms(
+                socket_path=cliargs.socketpath,
+                output_json=cliargs.output_json,
+            )
     except OSError as exc:
         logging.error(f"Unable to communicate with server socket: {exc}")
     except AnlasserInvalidResponseError as exc:

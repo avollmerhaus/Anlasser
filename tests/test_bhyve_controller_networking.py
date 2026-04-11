@@ -17,6 +17,8 @@ class FakeProc:
         return self.returncode
 
 
+# Intention: verify add_tap creates a tap device, brings it up, and adds it to the bridge.
+# Expected outcome: three ifconfig calls in order (create, up+description, bridge addm).
 def test_add_tap_creates_and_bridges(monkeypatch):
     calls = []
 
@@ -36,6 +38,8 @@ def test_add_tap_creates_and_bridges(monkeypatch):
     assert calls[2] == ("ifconfig", "bridge0", "addm", "tap3")
 
 
+# Intention: verify add_tap raises when tap device creation fails.
+# Expected outcome: RuntimeError is raised.
 def test_add_tap_fails_on_tap_creation(monkeypatch):
     async def fake_create_subprocess_exec(*args, **kwargs):
         return FakeProc(returncode=1)
@@ -46,6 +50,8 @@ def test_add_tap_fails_on_tap_creation(monkeypatch):
         asyncio.run(bhyve_controller_networking.add_tap("testvm1", "bridge0"))
 
 
+# Intention: verify add_tap raises when adding the tap to the bridge fails.
+# Expected outcome: RuntimeError is raised despite successful tap creation.
 def test_add_tap_fails_on_bridge_add(monkeypatch):
     calls = []
 
@@ -63,6 +69,8 @@ def test_add_tap_fails_on_bridge_add(monkeypatch):
         asyncio.run(bhyve_controller_networking.add_tap("testvm1", "bridge0"))
 
 
+# Intention: verify destroy_tap completes without error on success.
+# Expected outcome: no exception raised.
 def test_destroy_tap_success(monkeypatch):
     async def fake_create_subprocess_exec(*args, **kwargs):
         return FakeProc(returncode=0)
@@ -72,6 +80,8 @@ def test_destroy_tap_success(monkeypatch):
     asyncio.run(bhyve_controller_networking.destroy_tap("tap0"))
 
 
+# Intention: verify destroy_tap raises when the ifconfig destroy command fails.
+# Expected outcome: RuntimeError is raised.
 def test_destroy_tap_failure(monkeypatch):
     async def fake_create_subprocess_exec(*args, **kwargs):
         return FakeProc(returncode=1)

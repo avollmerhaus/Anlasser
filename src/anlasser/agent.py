@@ -118,4 +118,4 @@ class AnlasserAgent:
         return rc
 
     def _vm_config_path(self, vm_name):
-        return self._vm_configs_dir / f"{vm_name}.ini"
+        return self._vm_configs_dir / f"{vm_name}.toml"

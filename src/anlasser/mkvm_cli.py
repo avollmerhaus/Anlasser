@@ -65,7 +65,7 @@ def mkvm_cli():
     logging.info(f"Creating {cliargs.imgsize}GB sparse file at {disk_image_path}")
     create_sparse_file(file_path=disk_image_path, size_gbs=cliargs.imgsize)
 
-    config_file_path = f"/usr/local/etc/anlasser/{cliargs.name}.ini"
+    config_file_path = f"/usr/local/etc/anlasser/{cliargs.name}.toml"
     logging.info(
         f"Writing a basic config template to {config_file_path}, please modify it to your liking"
     )

@@ -59,12 +59,12 @@ def agent_cli():
         raise NotImplementedError
 
     socket_path = Path(cliargs.socketpath).expanduser()
-    try:
-        socket_path.unlink()
-    except FileNotFoundError:
-        pass
-    except OSError as exc:
-        logging.error(f"Unable to remove existing socket at {socket_path}: {exc}")
+    if socket_path.exists():
+        logging.error(
+            f"Socket already exists at {socket_path}; "
+            "another agent might be running. "
+            "If you are sure it is safe, remove it manually."
+        )
         return 5
 
     agent = AnlasserAgent(vm_configs_dir=vm_configs_dir, socket_path=socket_path)

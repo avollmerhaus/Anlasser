@@ -4,26 +4,31 @@ import subprocess
 # Keep in mind that we use this basic config for basic tests,
 # so if you change something here you need to change the assertions in the tests as well.
 def write_base_config(name, config_file_path, disk_image_path, uefi_vars_path):
-    ini_content = f"""[VM]
-name = {name}
+    toml_content = f"""[VM.general]
+name = "{name}"
 memory_mb = 1024
 cpu_sockets = 1
 cpu_cores = 2
 cpu_threads = 1
-storage_path = {disk_image_path}
-uefi_vars_storage_path = {uefi_vars_path}
+uefi_vars_storage_path = "{uefi_vars_path}"
 # See /usr/share/bhyve/kbdlayout for a list of valid layouts
-vnc_kbd_layout = de_noacc
+# iso_path = "/path/to/linux_iso.iso"
+
+[VM.vnc]
+vnc_kbd_layout = "de_noacc"
 vnc_port = 5900
 # vnc_wait_connect = true
-iso_path = /path/to/linux_iso.iso
 
-[NIC.0]
-bridge = bridge0
-mac = 02:00:00:00:02:01
+[VM.disks.disk0]
+storage_path = "{disk_image_path}"
+order = 0
+
+[VM.nics.nic0]
+bridge = "bridge0"
+mac = "02:00:00:00:02:01"
 """
     with open(config_file_path, "w", encoding="utf-8") as config_file:
-        config_file.write(ini_content)
+        config_file.write(toml_content)
 
 
 def create_zfs_dataset(parent_dataset, recordsize, name):

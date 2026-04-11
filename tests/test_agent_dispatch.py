@@ -1,5 +1,7 @@
 import asyncio
 import json
+import os
+import signal
 from pathlib import Path
 
 import anlasser.agent
@@ -91,6 +93,76 @@ def test_agent_list_vms_request(tmp_path, monkeypatch):
             assert response == {"status": 200, "body": {"response": {"vm_list": []}}}
         finally:
             await _shutdown_agent(agent, main_task)
+
+    asyncio.run(scenario())
+
+
+# Intention: verify list_vms returns started VMs.
+# Expected outcome: after starting a VM, list_vms includes its name.
+def test_agent_list_vms_with_running_vm(tmp_path, monkeypatch):
+    async def scenario():
+        agent, socket_path, main_task = await _run_agent_with_fake_bhyve_controller(
+            tmp_path, monkeypatch
+        )
+        try:
+            await _send_agent_request(
+                socket_path,
+                {"action": "set_vm_state", "body": {"vm_name": "vm1", "state": "up"}},
+            )
+            response = await _send_agent_request(
+                socket_path, {"action": "list_vms", "body": {}}
+            )
+            assert response == {
+                "status": 200,
+                "body": {"response": {"vm_list": ["vm1"]}},
+            }
+        finally:
+            await _shutdown_agent(agent, main_task)
+
+    asyncio.run(scenario())
+
+
+# Intention: verify get_vm_state for a VM that was never started.
+# Expected outcome: returns "down".
+def test_agent_get_vm_state_unknown_vm(tmp_path, monkeypatch):
+    async def scenario():
+        agent, socket_path, main_task = await _run_agent_with_fake_bhyve_controller(
+            tmp_path, monkeypatch
+        )
+        try:
+            response = await _send_agent_request(
+                socket_path,
+                {"action": "get_vm_state", "body": {"vm_name": "nonexistent"}},
+            )
+            assert response == {
+                "status": 200,
+                "body": {"response": {"vm_state": "down"}},
+            }
+        finally:
+            await _shutdown_agent(agent, main_task)
+
+    asyncio.run(scenario())
+
+
+# Intention: verify SIGTERM triggers graceful shutdown of running VMs.
+# Expected outcome: VM task receives cancellation when agent gets SIGTERM.
+# Together with test_controller_cancel_calls_stop (which verifies that cancellation
+# calls terminate on the bhyve proc), this covers the full SIGTERM→VM shutdown chain.
+def test_agent_sigterm_cancels_running_vm(tmp_path, monkeypatch):
+    async def scenario():
+        agent, socket_path, main_task = await _run_agent_with_fake_bhyve_controller(
+            tmp_path, monkeypatch
+        )
+        await _send_agent_request(
+            socket_path,
+            {"action": "set_vm_state", "body": {"vm_name": "vm1", "state": "up"}},
+        )
+        vm = agent._vms["vm1"]["controller"]
+
+        os.kill(os.getpid(), signal.SIGTERM)
+        await main_task
+
+        assert vm.stop_event.is_set()
 
     asyncio.run(scenario())
 
