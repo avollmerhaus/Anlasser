@@ -33,7 +33,7 @@ def load_bhyve_controller_config(vm, config_path):
         vm.cpu_cores = general["cpu_cores"]
         vm.cpu_threads = general["cpu_threads"]
         vm.uefi_vars_storage_path = general["uefi_vars_storage_path"]
-        vm.iso_path = general.get("iso_path", None)
+        vm.boot_iso_path = general.get("boot_iso_path", None)
         shutdown_timeout = general.get("shutdown_timeout", None)
         if shutdown_timeout is not None:
             vm.shutdown_timeout = float(shutdown_timeout)
@@ -69,7 +69,7 @@ def load_bhyve_controller_config(vm, config_path):
     nics_dict = config["VM"].get("nics", {})
     vm.nics = _parse_nics_sections(nics_dict)
 
-    logging.info(f"Successfully loaded config for VM {vm.name} from {config_path}")
+    logging.info(f"VM {vm.name}: Config loaded from {config_path}")
 
 
 def build_bhyve_command(vm):
@@ -160,21 +160,17 @@ def build_bhyve_command(vm):
             # Alternatives: com1,tcp=127.0.0.1:<port> or logging to a file.
             # '-l', 'com1,stdio',
             ####
-            # Theoretically, appending ",fwcfg=qemu" should have some benefits over the bhyve interface,
-            # for example it might get the bootindex option working.
-            # But all I got out of that were problems with unstable tsc clocksource.
-            # I'm not sure how bad that really is, but it seems to be linked to problem reports.
-            # So let's stay away from the newer fwcfg for now.
-            # Update 13.06.24: clocksource problems seem to be unrelated to `fwcfw=qemu`.
-            # Update 08.08.24: when testing with an Intel Atom C3558, `fwcfw=qemu` lead to problems with just one
-            # CPU core being detected inside the VM (tested with Linux kernel 6.1 and 6.11).
+            # fwcfg=qemu enables the QEMU-style firmware config interface, which is required
+            # for bootindex support (explicit boot order control). Requires edk2-bhyve >= g202408.
+            # Previously disabled due to a CPU core detection bug on Intel Atom C3558 (2024-08).
+            # Re-enabled 2026-04: not reproducible on other hardware with edk2-bhyve g202508.
             #
             # We use BHYVE_UEFI_CODE.fd (firmware code only), not BHYVE_UEFI.fd (combined code+vars).
             # Since we always pass a separate per-VM vars file (opened read-write by bhyve for
             # the guest to persist boot order etc.), the combined image is wrong here — it would
             # double the vars region. See the bhyve(8) man page bootrom examples.
             "-l",
-            f"bootrom,/usr/local/share/uefi-firmware/BHYVE_UEFI_CODE.fd,{vm.uefi_vars_storage_path}",
+            f"bootrom,/usr/local/share/uefi-firmware/BHYVE_UEFI_CODE.fd,{vm.uefi_vars_storage_path},fwcfg=qemu",
         ]
     )
 
@@ -197,9 +193,9 @@ def build_bhyve_command(vm):
                 f"No VNC keyboard layout file at {vnc_kbd_layout_path}, ignoring layout"
             )
 
-    if vm.iso_path is not None:
+    if vm.boot_iso_path is not None:
         # Some OS seem to be picky and want disk devices or dvds only in slots 3 to 6.
-        command.extend(["-s", f"3,ahci-cd,{vm.iso_path}"])
+        command.extend(["-s", f"3,ahci-cd,{vm.boot_iso_path}"])
 
     # VM name always has to be the last component of the bhyve command
     command.append(vm.name)

@@ -7,7 +7,7 @@ To keep the code simple, this project currently makes the following more or less
 - Tap networking only. Devices are created and destroyed automatically, one per NIC section in the config
 - Bridges must be pre-created from the outside
 - Up to 3 NVMe disk images per VM (PCI slots 4-6)
-- Disk image files must be pre-created from the outside
+- Disk image files must exist before starting a VM (use `anlasser-mkvm` or create them manually)
 - Everyone wants to use NVMe for the storage device and virtio for the NIC
 - A few other hardcoded Bhyve options
 - Everyone wants a VNC Server on localhost for console access, to be used via `ssh -L` or something
@@ -58,7 +58,7 @@ cpu_cores = 2
 cpu_threads = 1
 uefi_vars_storage_path = "/tank/VMs/test1/BHYVE_UEFI_VARS.fd"
 shutdown_timeout = 90
-# iso_path = "/path/to/linux_iso.iso"
+# boot_iso_path = "/path/to/linux_iso.iso"
 
 [VM.vnc]
 # See /usr/share/bhyve/kbdlayout for a list of valid layouts
@@ -92,12 +92,16 @@ bridge = "bridge1"
 - `mac` is optional per NIC. If omitted, Bhyve generates one automatically.
 - Zero NIC sections means no networking.
 - Tap devices are labelled `anlasser-vm-<name>` in `ifconfig` output for easy identification.
-- If `iso_path` is configured, we'll boot from the iso file.
+- If `boot_iso_path` is set, the ISO is attached as an AHCI CD-ROM device and a fresh UEFI vars file is copied to ensure the CD-ROM boots first. Remove the option after installation.
 
 Be sure not to exceed the number of cores / threads that your CPU actually has.  
-The Linux kernel inside the guest might otherwise start using `hpet` instead of `tsc` as a clock source.  
-That may lead to degraded performance. Look for `clocksource` entries in `dmesg`.  
 Note the number of threads is per-core and the number of cores is per-socket.  
+
+### TSC clocksource stability
+Linux guests on bhyve may log `Marking clocksource 'tsc' as unstable` and fall back to `hpet` (slower — each read causes a VM exit). This is a known false positive caused by vCPU scheduling jitter.  
+Fixed in Linux >= 6.3. For older kernels (e.g. 5.14 / Rocky 9): add `tsc=nowatchdog` to boot parameters.  
+This may be more likely to trigger with `fwcfg=qemu` enabled, possibly due to ACPI table delivery
+differences (linker/loader patching vs static in-memory copy). Not confirmed.
   
 We use flat files instead of zvols for the storage path.  
 As per [vermaden](https://vermaden.wordpress.com/2023/08/18/freebsd-bhyve-virtualization/), raw files and nvme are faster than virtio and zvols!  
@@ -115,15 +119,19 @@ Guests are expected to shut down immediately upon receipt of an ACPI shutdown si
 By default, `anlasser-agent` waits 90 seconds for a VM to shut down gracefully.  
 If it doesn't, the Bhyve process gets killed.
 
-### Re-installing guest OSes
-At the moment, adding an ISO file to a VM doesn't change the boot order.  
-This is not a big deal if there is no OS installed inside the VM,  
-but makes it hard to re-install the OS because he VM will continue to boot from it's normal UEFI vars entry.  
-Bhyve supports a bootindex order, but the TianoCore firmware inside the guest may ignore that.  
-The simplest way is probably to simply replace the UEFI vars file for the VM with a fresh one.  
-That should lead to the VM defaulting to a boot from the ISO file.  
-If you want to change the boot order manually,  
-set `vnc_wait_connect = True` in the VM config and mash F2 during VM startup.
+### Boot order
+UEFI firmware persists boot entries in the NVRAM vars file. Once entries exist, the stored
+`BootOrder` takes precedence and newly attached CD-ROM devices get skipped.  
+When `boot_iso_path` is set, Anlasser copies a fresh UEFI vars template before each start.
+This forces firmware to re-enumerate devices, discovering the CD-ROM first
+(removable media is enumerated before fixed disks). Remove `boot_iso_path` after installation.  
+To change boot order manually, set `vnc_wait_connect = true` and press F2 during startup.
+
+Note: bhyve's `bootindex` device option, which requires `fwcfg=qemu` on the bootrom line,
+should theoretically override persisted boot order via edk2's `SetBootOrderFromQemu`.
+In our testing (edk2-bhyve g202508, FreeBSD 15), this did not work — possibly due to
+OFW-to-UEFI device path translation issues for AHCI-CD devices.
+See `QemuBootOrderLib.c` and FreeBSD review D45768.
 
 ## How to use
 FIXME: Write some actual command examples and stuff here
@@ -169,10 +177,9 @@ start with `test_` inside the `tests` folder.
   allow us to name interfaces according to their VM name? See https://gist.github.com/gonzopancho/f58516e98f6c8a5a3013
   - `3:0,virtio-net,vale0:vm1`, `-s 3:0,virtio-net,vale0:vm2`
   - How do we create the switch and add an uplink interface? `man valectl`, `man vale`
-- The `fwcfg=qemu` bootrom option (QEMU-style firmware config interface) is intentionally not used.
-  It caused CPU core detection problems on Intel Atom C3558 (only 1 core visible to Linux 6.1/6.11 guests).
-  This limits features like `bootindex` for explicit boot order control. May be worth re-testing on newer
-  hardware and kernels.
+- `fwcfg=qemu` is enabled but `bootindex` does not work in practice (see "Boot order" above).
+  The CPU core detection problem on Intel Atom C3558 (2024-08) was not reproducible on other
+  hardware (2026-04, edk2-bhyve g202508).
 - The VNC ports should be managed internally
 - Serial console for the VMs. Currently commented out. Needs investigation into how guest serial output
   interacts with bhyve's own output, e.g. `com1,tcp=127.0.0.1:<port>` or logging to a file.
@@ -183,6 +190,8 @@ start with `test_` inside the `tests` folder.
 - NVMe tuning: bhyve supports `dsm=auto` (TRIM/deallocate, sensible for ZFS-backed storage), `maxq`/`qsz`/`ioslots`
   (queue depth and concurrency), `ser`/`eui64` (stable device identification in the guest), and `nocache`/`direct`
   (host caching bypass). These need benchmarking to determine optimal values. Maybe `sysbench`?
+- `anlasser-mkvm --nosync` sets `sync=disabled` on the VM's ZFS dataset for faster I/O at the cost of
+  durability. Intended for ephemeral VMs only — data may be lost on host crash or power failure.
 - Support pci / nvme device passthrough
 - Maybe we need a `--logfile` argument for `anlasser-agent`?
 - Create a proper FreeBSD port. Maybe see https://github.com/psy0rz/zfs_autobackup/tree/master for how they do that.

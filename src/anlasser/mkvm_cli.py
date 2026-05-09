@@ -43,6 +43,13 @@ def mkvm_cli():
         default="64k",
         help="ZFS dataset recordsize, the default 64k is a compromise. Tune to your workload.",
     )
+    parser.add_argument(
+        "--nosync",
+        dest="nosync",
+        action="store_true",
+        default=False,
+        help="Set sync=disabled on the ZFS dataset. Faster I/O but no durability guarantees. Use for ephemeral VMs only.",
+    )
 
     cliargs = parser.parse_args()
     logging.basicConfig(
@@ -53,7 +60,7 @@ def mkvm_cli():
         f"Creating ZFS dataset {cliargs.parent_dataset}/{cliargs.name}, recordsize {cliargs.dataset_recordsize}"
     )
     dataset_mountpath = create_zfs_dataset(
-        cliargs.parent_dataset, cliargs.dataset_recordsize, cliargs.name
+        cliargs.parent_dataset, cliargs.dataset_recordsize, cliargs.name, nosync=cliargs.nosync
     )
 
     uefi_vars_path = Path(dataset_mountpath, "BHYVE_UEFI_VARS.fd")

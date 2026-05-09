@@ -12,7 +12,7 @@ cpu_cores = 2
 cpu_threads = 1
 uefi_vars_storage_path = "{uefi_vars_path}"
 # See /usr/share/bhyve/kbdlayout for a list of valid layouts
-# iso_path = "/path/to/linux_iso.iso"
+# boot_iso_path = "/path/to/linux_iso.iso"
 
 [VM.vnc]
 vnc_kbd_layout = "de_noacc"
@@ -31,19 +31,21 @@ mac = "02:00:00:00:02:01"
         config_file.write(toml_content)
 
 
-def create_zfs_dataset(parent_dataset, recordsize, name):
+def create_zfs_dataset(parent_dataset, recordsize, name, nosync=False):
 
     dataset = f"{parent_dataset}/{name}"
 
-    subprocess.check_call(
-        [
-            "zfs",
-            "create",
-            "-o",
-            f"recordsize={recordsize}",
-            dataset,
-        ]
-    )
+    cmd = [
+        "zfs",
+        "create",
+        "-o",
+        f"recordsize={recordsize}",
+    ]
+    if nosync:
+        cmd.extend(["-o", "sync=disabled"])
+    cmd.append(dataset)
+
+    subprocess.check_call(cmd)
 
     mount_path_raw = subprocess.run(
         ["zfs", "get", "-H", "-o", "value", "mountpoint", dataset],

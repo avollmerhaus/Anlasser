@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import shutil
 from pathlib import Path
 
 from .bhyve_controller_config import load_bhyve_controller_config, build_bhyve_command
@@ -27,7 +28,7 @@ class AnlasserBhyveController:
         self.vnc_port = None
         self.vnc_kbd_layout = None
         self.vnc_wait_connect = False
-        self.iso_path = None
+        self.boot_iso_path = None
         self.shutdown_timeout = 90
 
     def load_config(self, config_path):
@@ -120,10 +121,25 @@ class AnlasserBhyveController:
                 )
 
             await self._network_setup()
+
+            # When booting from ISO, replace the UEFI vars file with a fresh template.
+            # UEFI firmware persists boot entries in NVRAM on first boot. Once entries exist,
+            # the stored BootOrder takes precedence and the CD-ROM gets skipped.
+            # A fresh vars file forces re-enumeration, which discovers the CD-ROM first
+            # (removable media is enumerated before fixed disks).
+            # This is safe because the vars file holds little of value for typical VMs —
+            # boot entries are re-created automatically by firmware enumeration.
+            if self.boot_iso_path is not None:
+                logging.info(f"VM {self.name}: boot_iso_path set, copying fresh UEFI vars template")
+                shutil.copy2(
+                    "/usr/local/share/uefi-firmware/BHYVE_UEFI_VARS.fd",
+                    self.uefi_vars_storage_path,
+                )
+
             bhyve_command = build_bhyve_command(self)
 
             bhyve_log_path = BHYVE_LOG_DIR / f"bhyve_{self.name}.log"
-            logging.info(f"Starting VM {self.name}, bhyve output → {bhyve_log_path}")
+            logging.info(f"VM {self.name}: Starting, bhyve output → {bhyve_log_path}")
             bhyve_log = open(bhyve_log_path, "a")
             try:
                 while True:
@@ -147,7 +163,7 @@ class AnlasserBhyveController:
             finally:
                 bhyve_log.close()
         except asyncio.CancelledError:
-            logging.info(f"VM {self.name} pid={proc.pid} cancelled, shutting down")
+            logging.info(f"VM {self.name}: pid={proc.pid} cancelled, shutting down (timeout={self.shutdown_timeout}s)")
             await self._stop_bhyve(proc)
             return
         finally:

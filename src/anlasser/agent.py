@@ -62,7 +62,7 @@ class AnlasserAgent:
                 raise
 
     async def set_vm_state(self, vm_name, target_state):
-        logging.info(f"set_vm_state: {vm_name} -> {target_state}")
+        logging.info(f"set_vm_state: VM {vm_name} -> {target_state}")
         if target_state == "down":
             if vm_name not in self._vms:
                 return True

@@ -27,7 +27,7 @@ def test_load_config_and_build_bhyve_command(tmp_path):
 
     assert command[-1] == vm_name
     assert (
-        f"bootrom,/usr/local/share/uefi-firmware/BHYVE_UEFI_CODE.fd,{expected_uefi_vars_path}"
+        f"bootrom,/usr/local/share/uefi-firmware/BHYVE_UEFI_CODE.fd,{expected_uefi_vars_path},fwcfg=qemu"
         in command
     )
     # NVMe disk on slot 4 (order 0)
